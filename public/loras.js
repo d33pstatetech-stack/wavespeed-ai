@@ -1,0 +1,487 @@
+/**
+ * WaveSpeed LoRA Quick Picker — HuggingFace D33pStateTech
+ * Shows HF LoRAs discovered via API and lets user copy/fill LoRA fields for current model.
+ * Supports multiple LoRA field names: loras (array), lora_url, lora_list, etc.
+ */
+(function(){
+  const USER_LORAS = [
+    {
+      id: "D33pStateTech/aznten-flux.1-dev-replicate",
+      name: "aznten-flux.1-dev-replicate",
+      base_model: "black-forest-labs/FLUX.1-dev",
+      pipeline: "text-to-image",
+      private: false,
+      instance_prompt: "aznten",
+      file: "aznten-flux.1-dev-replicate_Lora.safetensors",
+      repo_url: "https://huggingface.co/D33pStateTech/aznten-flux.1-dev-replicate",
+      file_url: "https://huggingface.co/D33pStateTech/aznten-flux.1-dev-replicate/resolve/main/aznten-flux.1-dev-replicate_Lora.safetensors",
+      suggested_target: "flux-1-dev-style-lora-inference (lora_url) / aznten_replicate (extra_lora)",
+      replicate_model: "d33pstatetech-stack/aznten_replicate",
+      ws_model: "flux-1-dev-style-lora-inference",
+      note: "FLUX.1-dev LoRA, trigger 'aznten'. Fill into a LoRA-accepting model (WaveSpeed lora endpoints take loras/lora_weights)."
+    },
+    {
+      id: "D33pStateTech/aznten-flux-schnell-mimicpc",
+      name: "aznten-flux-schnell-mimicpc",
+      base_model: "black-forest-labs/FLUX.1-schnell",
+      pipeline: "text-to-image",
+      private: false,
+      instance_prompt: "aznten",
+      file: "aznten-flux-schnell-mimicpc.safetensors",
+      repo_url: "https://huggingface.co/D33pStateTech/aznten-flux-schnell-mimicpc",
+      file_url: "https://huggingface.co/D33pStateTech/aznten-flux-schnell-mimicpc/resolve/main/aznten-flux-schnell-mimicpc.safetensors",
+      suggested_target: "aznten_replicate (model=schnell, extra_lora)",
+      replicate_model: "d33pstatetech-stack/aznten_replicate",
+      ws_model: "flux-schnell",
+      note: "FLUX.1-schnell LoRA, trigger 'aznten'. Checkpoint variant aznten-flux-schnell-mimicpc-000004.safetensors also in repo. Use as extra_lora with model=schnell."
+    },
+    {
+      id: "D33pStateTech/aznten-Qwen-Image-2512-Lora-WaveSpeed-AI",
+      name: "aznten-Qwen-Image-2512-Lora-WaveSpeed-AI",
+      base_model: "Qwen/Qwen-Image-2512",
+      pipeline: "text-to-image",
+      private: false,
+      instance_prompt: "aznten",
+      file: "aznten-Qwen-Image-2512-Lora-WaveSpeed-AI.safetensors",
+      repo_url: "https://huggingface.co/D33pStateTech/aznten-Qwen-Image-2512-Lora-WaveSpeed-AI",
+      file_url: "https://huggingface.co/D33pStateTech/aznten-Qwen-Image-2512-Lora-WaveSpeed-AI/resolve/main/aznten-Qwen-Image-2512-Lora-WaveSpeed-AI.safetensors",
+      suggested_target: "qwen-image-text-to-image-2512-lora (loras)",
+      replicate_model: "qwen/qwen-image",
+      ws_model: "qwen-image-text-to-image-2512-lora",
+      note: "Qwen-Image-2512 LoRA, trigger 'aznten'. For WaveSpeed use a qwen *-lora endpoint → loras: [{\"path\":\"...\",\"scale\":1}]. For Replicate use qwen/qwen-image → lora_weights."
+    },
+    {
+      id: "D33pStateTech/d33pstateten",
+      name: "d33pstateten",
+      base_model: "krea/Krea-2-Raw",
+      pipeline: "text-to-image",
+      private: false,
+      instance_prompt: "aznten",
+      file: "pytorch_lora_weights.safetensors",
+      repo_url: "https://huggingface.co/D33pStateTech/d33pstateten",
+      file_url: "https://huggingface.co/D33pStateTech/d33pstateten/resolve/main/pytorch_lora_weights.safetensors",
+      suggested_target: "krea-v2-turbo-lora (loras) or any Krea-2 via diffusers",
+      replicate_model: "krea/krea-2-large",
+      ws_model: "krea-v2-turbo-lora",
+      note: "Krea-2-Raw LoRA, trigger aznten. Public repo. For WaveSpeed use wavespeed-ai/krea-v2/turbo-lora → loras: [{\"path\":\"...\",\"scale\":1}]"
+    },
+    {
+      id: "D33pStateTech/d33pstateLora",
+      name: "d33pstateLora",
+      base_model: "black-forest-labs/FLUX.1-dev",
+      pipeline: "text-to-image",
+      private: false,
+      instance_prompt: "asian ten",
+      file: "flux-asian-ten-v2-000024.safetensors",
+      repo_url: "https://huggingface.co/D33pStateTech/d33pstateLora",
+      file_url: "https://huggingface.co/D33pStateTech/d33pstateLora/resolve/main/flux-asian-ten-v2-000024.safetensors",
+      suggested_target: "flux-dev-lora or flux-1-dev-style-lora-inference (lora_url) / aznten_replicate (extra_lora)",
+      ws_model: "flux-1-dev-style-lora-inference",
+      note: "FLUX.1-dev LoRA, trigger 'asian ten'. Fill into a LoRA-accepting model."
+    },
+    {
+      id: "D33pStateTech/asian-ten-wan21-lora",
+      name: "asian-ten-wan21-lora",
+      base_model: "Wan-AI/Wan2.1-T2V-14B",
+      pipeline: "video-generation",
+      private: false,
+      instance_prompt: "",
+      file: "asian_ten_wan21.safetensors",
+      repo_url: "https://huggingface.co/D33pStateTech/asian-ten-wan21-lora",
+      file_url: "https://huggingface.co/D33pStateTech/asian-ten-wan21-lora/resolve/main/asian_ten_wan21.safetensors",
+      suggested_target: "wan2.1-lora-t2v / wan2.1-lora-i2v / wavespeedai/wan-2.1-t2v-480p (lora_weights)",
+      ws_model: "wan2.1-lora-t2v",
+      note: "Wan2.1 T2V LoRA — use as lora_weights on wavespeedai/wan-2.1-t2v-480p or a WaveSpeed wan LoRA endpoint"
+    }
+  ];
+
+  // NSFW LoRA library — only adapters runnable on a LoRA endpoint (18+ only).
+  // FLUX.1-dev entries → flux-1-dev-style-lora-inference (lora_url).
+  // Wan 2.1 I2V entries → wan2.1-lora-i2v (lora_list).
+  // Wan 2.2 / unstamped entries have no known WaveSpeed LoRA endpoint — excluded.
+  const NSFW_LORAS = [
+    {
+      id: "xey/sldr_flux_nsfw_v2-studio",
+      name: "sldr_flux_nsfw_v2-studio",
+      base_model: "black-forest-labs/FLUX.1-dev",
+      pipeline: "text-to-image",
+      private: false,
+      instance_prompt: "",
+      file: "sldr_flux_nsfw_v2-studio.safetensors",
+      repo_url: "https://huggingface.co/xey/sldr_flux_nsfw_v2-studio",
+      file_url: "https://huggingface.co/xey/sldr_flux_nsfw_v2-studio/resolve/main/sldr_flux_nsfw_v2-studio.safetensors",
+      suggested_target: "flux-1-dev-style-lora-inference (lora_url)",
+      replicate_model: "d33pstatetech-stack/aznten_replicate",
+      ws_model: "flux-1-dev-style-lora-inference",
+      note: "307 likes · 1.1M downloads. Photorealistic-NSFW adapter — realistic-anatomy pick. No documented trigger. 687 MB."
+    },
+    {
+      id: "lustlyai/Flux_Lustly.ai_Uncensored_nsfw_v1",
+      name: "Flux_Lustly.ai_Uncensored_nsfw_v1",
+      base_model: "black-forest-labs/FLUX.1-dev",
+      pipeline: "text-to-image",
+      private: false,
+      instance_prompt: "",
+      file: "flux_lustly-ai_v1.safetensors",
+      repo_url: "https://huggingface.co/lustlyai/Flux_Lustly.ai_Uncensored_nsfw_v1",
+      file_url: "https://huggingface.co/lustlyai/Flux_Lustly.ai_Uncensored_nsfw_v1/resolve/main/flux_lustly-ai_v1.safetensors",
+      suggested_target: "flux-1-dev-style-lora-inference (lora_url)",
+      replicate_model: "d33pstatetech-stack/aznten_replicate",
+      ws_model: "flux-1-dev-style-lora-inference",
+      note: "275 likes · 155.5K downloads. General uncensored adapter, photorealistic gallery. No trigger word. 344 MB."
+    },
+    {
+      id: "lexa862/NSFWmodel",
+      name: "NSFWmodel",
+      base_model: "black-forest-labs/FLUX.1-dev",
+      pipeline: "text-to-image",
+      private: false,
+      instance_prompt: "Nude",
+      file: "NSFW_master.safetensors",
+      repo_url: "https://huggingface.co/lexa862/NSFWmodel",
+      file_url: "https://huggingface.co/lexa862/NSFWmodel/resolve/main/NSFW_master.safetensors",
+      suggested_target: "flux-1-dev-style-lora-inference (lora_url)",
+      replicate_model: "d33pstatetech-stack/aznten_replicate",
+      ws_model: "flux-1-dev-style-lora-inference",
+      note: "78 likes · 459.7K downloads. Trigger 'Nude'. 172 MB, permissive unlicense."
+    },
+    {
+      id: "Keltezaa/NSFW_MASTER_FLUX",
+      name: "NSFW_MASTER_FLUX",
+      base_model: "black-forest-labs/FLUX.1-dev",
+      pipeline: "text-to-image",
+      private: false,
+      instance_prompt: "NSFW",
+      file: "NSFW_master_Flux.safetensors",
+      repo_url: "https://huggingface.co/Keltezaa/NSFW_MASTER_FLUX",
+      file_url: "https://huggingface.co/Keltezaa/NSFW_MASTER_FLUX/resolve/main/NSFW_master_Flux.safetensors",
+      suggested_target: "flux-1-dev-style-lora-inference (lora_url)",
+      replicate_model: "d33pstatetech-stack/aznten_replicate",
+      ws_model: "flux-1-dev-style-lora-inference",
+      note: "68 likes · 30.3K downloads. Triggers: NSFW, Pussy, Vagina, Nude. MIT. 172 MB."
+    },
+    {
+      id: "imagepipeline/flux_uncensored_nsfw_v2",
+      name: "flux_uncensored_nsfw_v2",
+      base_model: "black-forest-labs/FLUX.1-dev",
+      pipeline: "text-to-image",
+      private: false,
+      instance_prompt: "",
+      file: "lora.safetensors",
+      repo_url: "https://huggingface.co/imagepipeline/flux_uncensored_nsfw_v2",
+      file_url: "https://huggingface.co/imagepipeline/flux_uncensored_nsfw_v2/resolve/main/lora.safetensors",
+      suggested_target: "flux-1-dev-style-lora-inference (lora_url)",
+      replicate_model: "d33pstatetech-stack/aznten_replicate",
+      ws_model: "flux-1-dev-style-lora-inference",
+      note: "34 likes · 33.1K downloads. Tagged ultra-realistic — realistic-anatomy pick. No documented trigger. 687 MB."
+    },
+    {
+      id: "Market5/Wan_2.2-2.1_POV_Missionary-high",
+      name: "POV Missionary-high (Wan2.1)",
+      base_model: "Wan-AI/Wan2.1-I2V-14B-720P",
+      pipeline: "video-generation",
+      private: false,
+      instance_prompt: "",
+      file: "wan2.2_i2v_highnoise_pov_missionary_v1.0.safetensors",
+      repo_url: "https://huggingface.co/Market5/Wan_2.2-2.1_POV_Missionary-high",
+      file_url: "https://huggingface.co/Market5/Wan_2.2-2.1_POV_Missionary-high/resolve/main/wan2.2_i2v_highnoise_pov_missionary_v1.0.safetensors",
+      suggested_target: "wan2.1-lora-i2v (lora_list)",
+      replicate_model: "wavespeedai/wan-2.1-i2v-720p",
+      ws_model: "wan2.1-lora-i2v",
+      note: "80 downloads. Stamped Wan 2.1 I2V 720P, missionary POV. Fills lora_list as {path, scale}. 307 MB."
+    },
+    {
+      id: "Market5/Double_Single_Handy_Blowjob",
+      name: "Handy Blowjob (Wan2.1)",
+      base_model: "Wan-AI/Wan2.1-I2V-14B-480P",
+      pipeline: "video-generation",
+      private: false,
+      instance_prompt: "",
+      file: "wan_dr34mj0b_t2v.safetensors",
+      repo_url: "https://huggingface.co/Market5/Double_Single_Handy_Blowjob",
+      file_url: "https://huggingface.co/Market5/Double_Single_Handy_Blowjob/resolve/main/wan_dr34mj0b_t2v.safetensors",
+      suggested_target: "wan2.1-lora-i2v (lora_list)",
+      replicate_model: "wavespeedai/wan-2.1-i2v-480p",
+      ws_model: "wan2.1-lora-i2v",
+      note: "36 downloads. Stamped Wan 2.1 I2V 480P. Fills lora_list as {path, scale}. 154 MB."
+    },
+    {
+      id: "Market5/Assertive_Cowgirl",
+      name: "Assertive Cowgirl (Wan2.1)",
+      base_model: "Wan-AI/Wan2.1-I2V-14B-720P",
+      pipeline: "video-generation",
+      private: false,
+      instance_prompt: "",
+      file: "Wan22-I2V-HIGH-Hip_Slammin_Assertive_Cowgirl.safetensors",
+      repo_url: "https://huggingface.co/Market5/Assertive_Cowgirl",
+      file_url: "https://huggingface.co/Market5/Assertive_Cowgirl/resolve/main/Wan22-I2V-HIGH-Hip_Slammin_Assertive_Cowgirl.safetensors",
+      suggested_target: "wan2.1-lora-i2v (lora_list)",
+      replicate_model: "wavespeedai/wan-2.1-i2v-720p",
+      ws_model: "wan2.1-lora-i2v",
+      note: "20 downloads. Stamped Wan 2.1 I2V 720P. Fills lora_list as {path, scale}. 307 MB."
+    }
+  ];
+
+  function copyText(t, label){
+    navigator.clipboard.writeText(t).then(()=> {
+      if(window.showToast) showToast(label + ' copied', 'success');
+      else alert(label + ' copied');
+    });
+  }
+
+  function findLoraFieldForCurrentModel(){
+    // Try to detect currentSchema (from window.currentSchema or app.js globals)
+    const schema = window.currentSchema || null;
+    if(!schema || !schema.params) return null;
+    const params = schema.params;
+    // Priority order for lora fields (schema-detected, provider-agnostic)
+    const candidates = [
+      {key:'loras', type:'array'}, // krea-v2-turbo-lora
+      {key:'lora_url', type:'string'}, // flux-1-dev-style-lora-inference
+      {key:'lora_list', type:'array'}, // flux-2-klein
+      {key:'lora_weights', type:'string'}, // wavespeed
+      {key:'extra_lora', type:'string'},
+      {key:'lora_scale', type:'number'},
+    ];
+    for(const c of candidates){
+      if(params[c.key]){
+        return c.key;
+      }
+    }
+    // Fallback: any key containing lora
+    for(const k of Object.keys(params)){
+      if(k.toLowerCase().includes('lora')){
+        return k;
+      }
+    }
+    return null;
+  }
+
+  function fillLoraForCurrentModel(repoUrl, fileUrl){
+    const curModel = window.currentModel;
+    const field = findLoraFieldForCurrentModel();
+    if(!curModel){
+      copyText(repoUrl, 'Repo URL');
+      if(window.showToast) showToast('Select a model first — copied repo URL', 'error');
+      return;
+    }
+    if(!field){
+      copyText(repoUrl, 'Repo URL');
+      if(window.showToast) showToast('No LoRA field for this model — copied repo URL', 'error');
+      return;
+    }
+    // Determine value to fill based on field type
+    const schema = window.currentSchema;
+    const spec = schema.params[field];
+    let valueToFill = repoUrl;
+    let displayLabel = field;
+
+    // Handle array types (loras, lora_list)
+    if(spec && spec.type==='array'){
+      // For loras/lora_list: expected [{path: url, scale: 1.0}]
+      // The path must resolve to weights — prefer the direct
+      // .safetensors file URL over the repo page URL (a repo page
+      // URL fails or hangs at LoRA download). Works for both Fill
+      // buttons since we pick whichever arg is the direct file.
+      const scale = 1.0;
+      const direct = [repoUrl, fileUrl].find(u => u && /\.safetensors(\?|#|$)/i.test(u)) || repoUrl;
+      valueToFill = [{ path: direct, scale: scale }];
+    } else if(spec && spec.type==='string'){
+      // For lora_url, lora_weights, extra_lora
+      // Use repo_url (or file_url if the field expects direct file)
+      // For wavespeedai, lora_weights can be HF repo URL
+      // For flux-1-dev-style-lora-inference, lora_url expects direct .safetensors URL? The description says "The LoRA file URL" — could be direct.
+      // We'll use file_url for direct file fields, repo_url for repo fields
+      // Heuristic: if field is lora_weights or lora_url and file_url ends with .safetensors, use file_url for direct
+      if(field==='lora_weights' || field==='lora_url'){
+        // Prefer file_url if available and field description mentions file URL
+        // But repo_url also works for many. We'll use file_url for direct to be safe, but also provide repo_url as alternative
+        // Default to repo_url for compatibility, but if user wants file, they can copy file_url
+        valueToFill = fileUrl || repoUrl;
+      } else {
+        valueToFill = repoUrl;
+      }
+    }
+
+    // Try to set via currentParams and UI
+    // currentParams is object, and renderParams handles array vs string
+    // We need to set window.currentParams[field] and re-render
+    try{
+      if(window.currentParams){
+        window.currentParams[field] = valueToFill;
+      }
+      // Try to find input element for that field
+      // For array fields, the UI may be more complex (e.g., loras is array, renders as???)
+      // For now, just update currentParams and refresh payload preview
+      if(window.updatePayloadPreview) window.updatePayloadPreview();
+      // Try to find and update the input element if it exists
+      const input = document.querySelector(`[data-param="${field}"]`);
+      if(input){
+        if(input.tagName==='SELECT'){
+          // not expected for lora
+        } else if(input.type==='checkbox'){
+          // no
+        } else {
+          // For string fields, set value
+          if(typeof valueToFill === 'string'){
+            input.value = valueToFill;
+            input.dispatchEvent(new Event('input', {bubbles:true}));
+            input.dispatchEvent(new Event('change', {bubbles:true}));
+          } else if(Array.isArray(valueToFill)){
+            // For array, the UI may be a custom component, try to trigger re-render
+            // Force re-render of params
+            if(window.currentSchema){
+              // Re-render params to show updated value
+              // The function renderParams is in app.js, but not exposed globally. Try to trigger selectModel reload?
+              // Instead, just show toast and copy
+            }
+            // Also copy the JSON to clipboard for manual paste
+            copyText(JSON.stringify(valueToFill), field);
+            if(window.showToast) showToast(`Filled ${field} with LoRA array — also copied JSON`, 'success');
+            return;
+          }
+        }
+        input.focus();
+        input.select();
+      }
+      if(window.showToast) showToast(`Filled ${field} with LoRA`, 'success');
+      // Also copy to clipboard for convenience
+      // Don't auto-copy, just fill
+    } catch(e){
+      console.error(e);
+      copyText(typeof valueToFill==='string'? valueToFill : JSON.stringify(valueToFill), field);
+    }
+  }
+
+  function renderLoraListInto(listId, loras, hintId){
+    const list = document.getElementById(listId);
+    const hint = hintId ? document.getElementById(hintId) : null;
+    if(!list || !loras) return;
+    list.innerHTML = loras.map(l => `
+      <div class="p-2 rounded-lg bg-gray-800/50 border border-gray-700 hover:border-purple-600/50 transition-colors">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0 flex-1">
+            <div class="flex items-center gap-1.5">
+              <span class="text-xs font-semibold text-gray-200 truncate">${l.name}</span>
+              ${l.private ? '<span class="text-[9px] bg-amber-900/50 text-amber-300 border border-amber-800 px-1.5 py-0.5 rounded-full">Private</span>' : '<span class="text-[9px] bg-emerald-900/30 text-emerald-300 border border-emerald-800 px-1.5 py-0.5 rounded-full">Public</span>'}
+              <span class="text-[10px] text-gray-500 truncate">${l.base_model}</span>
+            </div>
+            <div class="text-[10px] text-gray-500 mt-0.5 truncate">${l.id} • ${l.file}</div>
+            <div class="mt-1 flex items-center gap-1.5">
+              <span class="text-[10px] text-gray-500">Trigger:</span>
+              ${l.instance_prompt ? `<code class="text-[11px] font-bold bg-fuchsia-900/40 border border-fuchsia-700 text-fuchsia-300 px-1.5 py-0.5 rounded">${l.instance_prompt}</code><button data-copy-trigger="${l.id}" class="icon-btn !w-6 !h-6" title="Copy trigger"><i class="fas fa-copy text-[9px]"></i></button>` : `<span class="text-[10px] text-gray-600 italic">No trigger — general style</span>`}
+            </div>
+            <div class="text-[10px] text-gray-400 mt-1 line-clamp-2">${l.note}</div>
+            <div class="text-[10px] text-purple-300 mt-1">→ ${l.suggested_target}</div>
+          </div>
+          <span class="text-[10px] text-gray-600">${l.pipeline==='video-generation' ? '<i class="fas fa-video"></i>' : '<i class="fas fa-image"></i>'}</span>
+        </div>
+        <div class="mt-2 space-y-1.5">
+          <div class="flex gap-1">
+            <code class="flex-1 text-[10px] bg-gray-900 border border-gray-700 rounded px-2 py-1 truncate">${l.repo_url}</code>
+            <button data-copy-repo="${l.id}" class="icon-btn !w-7 !h-7" title="Copy repo URL"><i class="fas fa-copy text-[10px]"></i></button>
+            <button data-fill-repo="${l.id}" class="btn-primary-sm !px-2 !py-1 text-[10px]">Fill</button>
+          </div>
+          <div class="flex gap-1">
+            <code class="flex-1 text-[10px] bg-gray-900 border border-gray-700 rounded px-2 py-1 truncate">${l.file_url}</code>
+            <button data-copy-file="${l.id}" class="icon-btn !w-7 !h-7" title="Copy .safetensors URL"><i class="fas fa-file text-[10px]"></i></button>
+            <button data-fill-file="${l.id}" class="btn-secondary !px-2 !py-1 text-[10px]">Fill file</button>
+          </div>
+        </div>
+      </div>
+    `).join('');
+    if(hint) hint.classList.remove('hidden');
+    // Wire events (scoped to this list container)
+    list.querySelectorAll('[data-copy-repo]').forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        const id=btn.getAttribute('data-copy-repo');
+        const l=loras.find(x=>x.id===id);
+        if(l) copyText(l.repo_url, 'Repo URL');
+      });
+    });
+    list.querySelectorAll('[data-copy-file]').forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        const id=btn.getAttribute('data-copy-file');
+        const l=loras.find(x=>x.id===id);
+        if(l) copyText(l.file_url, 'File URL');
+      });
+    });
+    list.querySelectorAll('[data-copy-trigger]').forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        const id=btn.getAttribute('data-copy-trigger');
+        const l=loras.find(x=>x.id===id);
+        if(l && l.instance_prompt) copyText(l.instance_prompt, 'Trigger');
+      });
+    });
+    list.querySelectorAll('[data-fill-repo]').forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        const id=btn.getAttribute('data-fill-repo');
+        const l=loras.find(x=>x.id===id);
+        if(l) fillLoraForCurrentModel(l.repo_url, l.file_url);
+      });
+    });
+    list.querySelectorAll('[data-fill-file]').forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        const id=btn.getAttribute('data-fill-file');
+        const l=loras.find(x=>x.id===id);
+        if(l) fillLoraForCurrentModel(l.file_url, l.repo_url);
+      });
+    });
+  }
+  function renderLoraList(){ renderLoraListInto('loraListWs', (typeof USER_LORAS!=='undefined') ? USER_LORAS : [], 'loraHintWs'); }
+  function renderNsfwLoraList(){ renderLoraListInto('nsfwLoraListWs', (typeof NSFW_LORAS!=='undefined') ? NSFW_LORAS : [], 'nsfwLoraHintWs'); }
+
+  function initLoraPicker(){
+    const btn=document.getElementById('btnToggleLoraListWs');
+    const list=document.getElementById('loraListWs');
+    if(btn && list){
+      btn.addEventListener('click', ()=>{
+        const hidden=list.classList.contains('hidden');
+        if(hidden){
+          list.classList.remove('hidden');
+          document.getElementById('loraHintWs')?.classList.remove('hidden');
+          btn.innerHTML='<i class="fas fa-chevron-up mr-1"></i> Hide LoRAs';
+          renderLoraList();
+        } else {
+          list.classList.add('hidden');
+          document.getElementById('loraHintWs')?.classList.add('hidden');
+          btn.innerHTML='<i class="fas fa-chevron-down mr-1"></i> Show LoRAs';
+        }
+      });
+    }
+    const nsfwBtn=document.getElementById('btnToggleNsfwLoraListWs');
+    const nsfwList=document.getElementById('nsfwLoraListWs');
+    if(nsfwBtn && nsfwList){
+      nsfwBtn.addEventListener('click', ()=>{
+        const hidden=nsfwList.classList.contains('hidden');
+        if(hidden){
+          nsfwList.classList.remove('hidden');
+          document.getElementById('nsfwLoraHintWs')?.classList.remove('hidden');
+          nsfwBtn.innerHTML='<i class="fas fa-chevron-up mr-1"></i> Hide NSFW LoRAs';
+          renderNsfwLoraList();
+        } else {
+          nsfwList.classList.add('hidden');
+          document.getElementById('nsfwLoraHintWs')?.classList.add('hidden');
+          nsfwBtn.innerHTML='<i class="fas fa-chevron-down mr-1"></i> Show NSFW LoRAs';
+        }
+      });
+    }
+    // Re-render hint when model changes
+    const origSelect = window.selectModel;
+    if(origSelect){
+      window.selectModel = async function(...a){
+        const r=await origSelect(...a);
+        if(list && !list.classList.contains('hidden')) renderLoraList();
+        if(nsfwList && !nsfwList.classList.contains('hidden')) renderNsfwLoraList();
+        return r;
+      };
+    }
+  }
+
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', initLoraPicker);
+  else initLoraPicker();
+
+  // Expose for debugging
+  window.USER_LORAS = USER_LORAS;
+  window.NSFW_LORAS = (typeof NSFW_LORAS!=='undefined') ? NSFW_LORAS : [];
+})();

@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WaveSpeed Prompt Generator</title>
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <link href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.5.0/css/all.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body class="bg-gray-950 text-gray-100 min-h-screen">
+
+  <!-- Header -->
+  <header class="header">
+    <div class="max-w-[1600px] mx-auto px-6 py-3 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <div class="logo-icon"><i class="fas fa-bolt"></i></div>
+        <div>
+          <h1 class="text-lg font-bold gradient-text">WaveSpeed Prompt Generator</h1>
+          <p class="text-[11px] text-gray-500"><span id="headerModelCount">—</span> models &middot; Image &middot; Video &middot; Audio &middot; 3D &middot; <span id="headerSyncedAt" class="text-gray-600"></span></p>
+        </div>
+      </div>
+      <div class="flex items-center gap-3">
+        <button id="btnSync" class="header-btn" title="Update catalog — pull new models & params from WaveSpeed">
+          <i class="fas fa-sync-alt"></i>
+        </button>
+        <button id="btnSavedPrompts" class="header-btn" title="Saved Prompts">
+          <i class="fas fa-bookmark"></i>
+        </button>
+        <button id="btnTemplates" class="header-btn" title="Templates">
+          <i class="fas fa-layer-group"></i>
+        </button>
+        <button id="btnSettings" class="header-btn" title="LLM Settings">
+          <i class="fas fa-cog"></i>
+        </button>
+        <span id="connectionDot" class="w-2 h-2 rounded-full bg-gray-600"></span>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-[1600px] mx-auto px-6 py-6">
+
+    <!-- Category Tabs -->
+    <div class="flex gap-2 mb-6 overflow-x-auto pb-1">
+      <button class="cat-tab active" data-group="image"><i class="fas fa-image mr-1.5"></i>Image</button>
+      <button class="cat-tab" data-group="video"><i class="fas fa-video mr-1.5"></i>Video</button>
+      <button class="cat-tab" data-group="audio"><i class="fas fa-music mr-1.5"></i>Audio</button>
+      <button class="cat-tab" data-group="text"><i class="fas fa-comment mr-1.5"></i>Text</button>
+      <button class="cat-tab" data-group="3d"><i class="fas fa-cube mr-1.5"></i>3D</button>
+      <button class="cat-tab" data-group="all"><i class="fas fa-th mr-1.5"></i>All</button>
+    </div>
+
+    <div class="grid grid-cols-1 xl:grid-cols-[340px_1fr_380px] lg:grid-cols-[300px_1fr] gap-6">
+
+      <!-- ═══ LEFT: Model + Parameters ═══ -->
+      <div class="space-y-4">
+
+        <!-- Quick LoRA Picker — HuggingFace (D33pStateTech) -->
+        <section class="panel" id="loraQuickPanelWs">
+          <div class="flex items-center justify-between">
+            <h2 class="panel-title !mb-0"><i class="fas fa-palette"></i> My HuggingFace LoRAs</h2>
+            <span class="text-[10px] bg-purple-600 text-white px-2 py-0.5 rounded-full">3 • HF</span>
+          </div>
+          <p class="text-[11px] text-gray-500 mt-1 mb-2">HF token detected for <code class="bg-gray-800 px-1 rounded">D33pStateTech</code> — quick copy repo or <code>.safetensors</code> URL. <span class="text-emerald-300">No HF token entry needed in LoRA box</span> — <span class="text-amber-300">Private</span> is auto-proxied via Worker using <code>HUGGINGFACE_API_KEY</code> from <code>.env</code>. Click <span class="text-purple-300">Fill</span> to auto-fill.</p>
+          <button id="btnToggleLoraListWs" class="w-full flex items-center justify-center gap-2 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg px-3 py-2 text-xs"><i class="fas fa-chevron-down"></i> Show LoRAs</button>
+          <div id="loraListWs" class="space-y-2 mt-3 hidden"></div>
+          <div id="loraHintWs" class="text-[10px] text-gray-600 mt-2 hidden">Select a model that accepts LoRA (e.g. <code>krea-v2-turbo-lora</code> → <code>lora</code>, <code>flux_dev_lora_image</code>) then click Fill.</div>
+        </section>
+
+        <!-- Model Selector -->
+        <section class="panel">
+          <h2 class="panel-title"><i class="fas fa-brain"></i> Model</h2>
+          <div class="relative" id="modelSelectorWrap">
+            <div class="model-search-box" id="modelSearchBox">
+              <i class="fas fa-search search-icon"></i>
+              <input id="modelSearch" type="text" placeholder="Search models..." class="model-search-input">
+              <span id="modelCount" class="model-count-badge"></span>
+            </div>
+            <div id="modelDropdown" class="model-dropdown hidden"></div>
+          </div>
+          <div id="modelInfo" class="model-info hidden">
+            <span id="modelCategoryBadge" class="badge"></span>
+            <span id="modelCostLabel" class="text-xs text-gray-400"></span>
+            <a id="modelPlaygroundLink" href="#" target="_blank" class="text-xs text-purple-400 hover:text-purple-300 ml-auto">
+              <i class="fas fa-external-link-alt"></i> Playground
+            </a>
+          </div>
+        </section>
+
+        <!-- Dynamic Parameters -->
+        <section id="paramsPanel" class="panel hidden">
+          <h2 class="panel-title"><i class="fas fa-sliders-h"></i> Parameters</h2>
+          <div id="paramsForm" class="space-y-4"></div>
+        </section>
+
+        <!-- Prompt Templates (hidden by default) -->
+        <section id="templatesPanel" class="panel hidden">
+          <h2 class="panel-title"><i class="fas fa-layer-group"></i> Templates</h2>
+          <div id="templatesList" class="space-y-2"></div>
+        </section>
+
+        <!-- Saved Prompts (hidden by default) -->
+        <section id="savedPanel" class="panel hidden">
+          <h2 class="panel-title"><i class="fas fa-bookmark"></i> Saved Prompts</h2>
+          <div id="savedList" class="space-y-2 max-h-64 overflow-y-auto"></div>
+        </section>
+      </div>
+
+      <!-- ═══ CENTER: Prompt + Actions ═══ -->
+      <div class="space-y-4">
+
+        <!-- Prompt Input -->
+        <section class="panel">
+          <div class="flex items-center justify-between mb-3">
+            <h2 class="panel-title mb-0"><i class="fas fa-pen"></i> Prompt</h2>
+            <div class="flex gap-1.5">
+              <button id="btnSavePrompt" class="icon-btn" title="Save prompt"><i class="fas fa-bookmark"></i></button>
+              <button id="btnEnhance" class="icon-btn" title="Enhance with keywords"><i class="fas fa-magic"></i></button>
+              <button id="btnClear" class="icon-btn" title="Clear"><i class="fas fa-eraser"></i></button>
+            </div>
+          </div>
+          <textarea id="promptInput" class="prompt-textarea" placeholder="Describe what you want to generate in detail..."></textarea>
+          <div class="flex items-center justify-between mt-2">
+            <span id="charCount" class="text-[11px] text-gray-600">0 chars</span>
+            <span class="text-[11px] text-gray-600"><kbd class="kbd">Ctrl</kbd>+<kbd class="kbd">Enter</kbd> to generate</span>
+          </div>
+        </section>
+
+        <!-- Generate Button -->
+        <button id="btnGenerate" class="generate-btn" disabled>
+          <span id="genBtnText"><i class="fas fa-play mr-2"></i>Generate</span>
+          <div id="genBtnSpinner" class="spinner hidden"></div>
+        </button>
+
+        <!-- Cost Estimate -->
+        <div id="costBar" class="cost-bar hidden">
+          <span>Estimated cost:</span>
+          <span id="costValue" class="font-mono text-purple-300"></span>
+          <button id="btnEstimate" class="text-[11px] text-gray-500 hover:text-purple-400 ml-auto" title="Refresh estimate">
+            <i class="fas fa-sync-alt"></i>
+          </button>
+        </div>
+
+        <!-- Status -->
+        <section id="statusCard" class="panel hidden">
+          <div class="flex items-center gap-3">
+            <div id="statusSpinner" class="spinner hidden"></div>
+            <div class="flex-1">
+              <div id="statusText" class="text-sm font-medium"></div>
+              <div id="statusDetail" class="text-xs text-gray-500 mt-0.5"></div>
+            </div>
+          </div>
+          <div id="progressWrap" class="progress-wrap hidden">
+            <div id="progressBar" class="progress-bar"></div>
+          </div>
+        </section>
+
+        <!-- Output -->
+        <section id="outputCard" class="panel hidden">
+          <div class="flex items-center justify-between mb-3">
+            <h2 class="panel-title mb-0"><i class="fas fa-image"></i> Output</h2>
+            <div class="flex gap-1.5">
+              <button id="btnCopyUrl" class="icon-btn" title="Copy URL"><i class="fas fa-link"></i></button>
+              <button id="btnDownload" class="icon-btn" title="Download"><i class="fas fa-download"></i></button>
+              <button id="btnOpenNew" class="icon-btn" title="Open full size"><i class="fas fa-expand"></i></button>
+            </div>
+          </div>
+          <div id="outputContent" class="output-content"></div>
+          <div id="outputMeta" class="output-meta"></div>
+        </section>
+
+        <!-- API Payload Preview -->
+        <section class="panel">
+          <div class="flex items-center justify-between mb-3">
+            <h2 class="panel-title mb-0"><i class="fas fa-code"></i> API Payload</h2>
+            <button id="btnCopyPayload" class="icon-btn" title="Copy JSON"><i class="fas fa-copy"></i></button>
+          </div>
+          <pre id="payloadPreview" class="payload-preview">{ "prompt": "..." }</pre>
+        </section>
+
+        <!-- History -->
+        <section class="panel">
+          <h2 class="panel-title"><i class="fas fa-history"></i> Recent</h2>
+          <div id="historyGrid" class="history-grid">
+            <p class="text-xs text-gray-600 col-span-full py-8 text-center">No generations yet.</p>
+          </div>
+        </section>
+      </div>
+
+      <!-- ═══ RIGHT: Model Details (xl only) ═══ -->
+      <div class="space-y-4 hidden xl:block">
+        <section class="panel">
+          <h2 class="panel-title"><i class="fas fa-info-circle"></i> Model Details</h2>
+          <div id="modelDetails" class="text-sm text-gray-400">
+            <p class="text-xs text-gray-600">Select a model to see details.</p>
+          </div>
+        </section>
+
+        <!-- AI Prompt Enhancer -->
+        <section id="enhancerPanel" class="panel">
+          <h2 class="panel-title"><i class="fas fa-wand-magic-sparkles"></i> AI Prompt Enhancer</h2>
+          <p class="text-[11px] text-gray-500 mb-2">Refine your prompt for the selected model. Context is auto-filled.</p>
+          <textarea id="enhancerInput" class="prompt-textarea" style="min-height:80px" placeholder="Write a rough prompt to enhance..."></textarea>
+          <div id="enhancerContextPreview" class="text-[10px] text-gray-600 mt-2 p-2 rounded bg-gray-900/50 hidden"></div>
+          <button id="btnEnhancePrompt" class="btn-primary-sm w-full mt-2"><i class="fas fa-wand-magic-sparkles mr-1"></i> Enhance — streaming</button>
+          <div id="enhancerOutputWrap" class="mt-3">
+            <label class="text-[11px] text-gray-500">Enhanced <span class="text-gray-600">(live stream)</span></label>
+            <textarea id="enhancerOutput" class="prompt-textarea" style="min-height:100px" readonly placeholder="Enhanced prompt will stream here token-by-token..."></textarea>
+            <div class="flex gap-1.5 mt-2">
+              <button id="btnUseEnhanced" class="btn-primary-sm flex-1"><i class="fas fa-arrow-up mr-1"></i> Use as Prompt</button>
+              <button id="btnCopyEnhanced" class="icon-btn" title="Copy"><i class="fas fa-copy"></i></button>
+              <button id="btnSaveEnhanced" class="icon-btn" title="Save"><i class="fas fa-bookmark"></i></button>
+            </div>
+            <div id="enhancerMeta" class="text-[10px] text-gray-600 mt-1">Select a model, enter a prompt, click Enhance.</div>
+          </div>
+        </section>
+
+        <section class="panel">
+          <h2 class="panel-title"><i class="fas fa-lightbulb"></i> Tips</h2>
+          <ul class="tips-list">
+            <li><i class="fas fa-check"></i> Be specific about lighting, camera angle, and mood</li>
+            <li><i class="fas fa-check"></i> Include quality keywords: 8k, ultra-detailed, photorealistic</li>
+            <li><i class="fas fa-check"></i> For video, describe motion: "camera slowly pans right"</li>
+            <li><i class="fas fa-check"></i> Use negative prompts to exclude unwanted elements</li>
+          </ul>
+        </section>
+      </div>
+    </div>
+  </main>
+
+  <!-- NSFW LoRA Picker — LoRA-runnable adapters only (18+) -->
+  <div class="max-w-[1600px] mx-auto px-6 pb-6">
+    <section class="panel" id="nsfwLoraPanelWs">
+      <div class="flex items-center justify-between">
+        <h2 class="panel-title !mb-0"><i class="fas fa-fire"></i> NSFW LoRAs — LoRA-runnable</h2>
+        <span class="text-[10px] bg-red-700 text-white px-2 py-0.5 rounded-full">8 • NSFW</span>
+      </div>
+      <p class="text-[11px] text-gray-500 mt-1 mb-2">Pick a WaveSpeed model whose id contains 'lora' (H3, LTX, Krea and FLUX LoRA variants), then click Fill. 18+ only.</p>
+      <button id="btnToggleNsfwLoraListWs" class="w-full flex items-center justify-center gap-2 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg px-3 py-2 text-xs"><i class="fas fa-chevron-down"></i> Show NSFW LoRAs</button>
+      <div id="nsfwLoraListWs" class="space-y-2 mt-3 hidden"></div>
+      <div id="nsfwLoraHintWs" class="text-[10px] text-gray-600 mt-2 hidden">Select <code>flux-1-dev-style-lora-inference</code> or <code>wan2.1-lora-i2v</code>, then click <span class="text-red-300">Fill</span>.</div>
+    </section>
+  </div>
+
+  <!-- Mobile Enhancer (collapsible below main prompt, < xl) -->
+  <div class="xl:hidden max-w-[1600px] mx-auto px-6 pb-6">
+    <section id="enhancerPanelMobile" class="panel">
+      <button id="btnToggleMobileEnhancer" class="w-full flex items-center justify-between">
+        <span class="panel-title mb-0"><i class="fas fa-wand-magic-sparkles"></i> AI Prompt Enhancer</span>
+        <i class="fas fa-chevron-down text-gray-600 text-xs"></i>
+      </button>
+      <div id="enhancerMobileBody" class="hidden mt-3">
+        <textarea id="enhancerInputMobile" class="prompt-textarea" style="min-height:80px" placeholder="Write a rough prompt to enhance..."></textarea>
+        <button id="btnEnhancePromptMobile" class="btn-primary-sm w-full mt-2"><i class="fas fa-wand-magic-sparkles mr-1"></i> Enhance — streaming</button>
+        <div id="enhancerOutputWrapMobile" class="mt-3">
+          <textarea id="enhancerOutputMobile" class="prompt-textarea" style="min-height:100px" readonly></textarea>
+          <div class="flex gap-1.5 mt-2">
+            <button id="btnUseEnhancedMobile" class="btn-primary-sm flex-1"><i class="fas fa-arrow-up mr-1"></i> Use as Prompt</button>
+            <button id="btnCopyEnhancedMobile" class="icon-btn"><i class="fas fa-copy"></i></button>
+          </div>
+          <div id="enhancerMetaMobile" class="text-[10px] text-gray-600 mt-1"></div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- Image Upload Modal -->
+  <div id="uploadModal" class="modal" style="display: none;">
+    <div class="modal-backdrop" id="uploadBackdrop"></div>
+    <div class="modal-content">
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="text-lg font-semibold">Upload Image</h3>
+        <button id="closeUploadModal" class="icon-btn" type="button"><i class="fas fa-times"></i></button>
+      </div>
+      <div id="dropZone" class="drop-zone">
+        <i class="fas fa-cloud-upload-alt text-3xl text-gray-600 mb-3"></i>
+        <p class="text-sm text-gray-400">Drag & drop an image here</p>
+        <p class="text-xs text-gray-600 mt-1">or</p>
+        <label class="upload-btn mt-3">
+          <i class="fas fa-folder-open mr-1"></i> Browse Files
+          <input type="file" id="fileInput" accept="image/*" class="hidden">
+        </label>
+      </div>
+      <div class="flex items-center gap-2 my-3">
+        <div class="h-px bg-gray-800 flex-1"></div>
+        <span class="text-xs text-gray-600">OR</span>
+        <div class="h-px bg-gray-800 flex-1"></div>
+      </div>
+      <div class="flex gap-2">
+        <input id="imageUrlInput" type="url" class="input flex-1" placeholder="Paste image URL...">
+        <button id="btnUseUrl" class="btn-primary-sm" type="button">Use URL</button>
+      </div>
+      <div id="uploadPreview" class="upload-preview hidden">
+        <img id="uploadPreviewImg" src="" alt="Preview">
+        <div id="uploadStatus" class="text-xs text-gray-400 mt-2"></div>
+      </div>
+      <div class="flex justify-end gap-2 mt-4">
+        <button id="btnCancelUpload" class="btn-secondary" type="button">Cancel</button>
+        <button id="btnConfirmUpload" class="btn-primary-sm hidden" type="button">Use This Image</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Settings Modal -->
+  <div id="settingsModal" class="modal" style="display: none;">
+    <div class="modal-backdrop" id="settingsBackdrop"></div>
+    <div class="modal-content" style="max-width:640px; max-height:85vh; overflow-y:auto;">
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="text-lg font-semibold">LLM Settings</h3>
+        <button id="closeSettingsModal" class="icon-btn" type="button"><i class="fas fa-times"></i></button>
+      </div>
+      <p class="text-xs text-gray-500 mb-3">Flat fallback chain — tried in order. Each row is provider + model. Drag to reorder. Keys are stored locally and on the server (masked when fetched).</p>
+      <div id="llmProvidersList" class="space-y-2"></div>
+      <button id="btnAddProvider" class="btn-secondary w-full mt-3" type="button"><i class="fas fa-plus mr-1"></i> Add model</button>
+      <div class="flex justify-end gap-2 mt-4">
+        <button id="btnCancelSettings" class="btn-secondary" type="button">Cancel</button>
+        <button id="btnSaveSettings" class="btn-primary-sm" type="button">Save</button>
+      </div>
+      <div id="settingsStatus" class="text-xs mt-2 hidden"></div>
+    </div>
+  </div>
+
+  <script src="/app.js"></script>
+  <script src="/enhancer.js"></script>
+  <script src="/loras.js"></script>
+</body>
+</html>

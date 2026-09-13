@@ -1,0 +1,23 @@
+name = "wavespeed-prompt-generator"
+main = "src/worker.js"
+compatibility_date = "2025-01-01"
+
+[assets]
+directory = "public"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "wavespeed-models"
+database_id = "eef5c721-6172-4e19-9f72-f101cdd7da52"
+
+[[d1_databases]]
+binding = "HISTORY"
+database_name = "genai-history"
+database_id = "6a271502-ea90-411b-935c-50a16d5d5300"
+
+[[r2_buckets]]
+binding = "OUTPUTS_BUCKET"
+bucket_name = "genai-assets"
+
+[vars]
+WAVESPEED_BASE_URL = "https://api.wavespeed.ai/api/v3"
