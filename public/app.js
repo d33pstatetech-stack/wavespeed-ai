@@ -302,6 +302,7 @@ function renderImageUpload(name, spec, isMulti) {
       <div class="url-input-row">
         <input type="url" placeholder="Or paste URL..." id="urlInput_${name}">
         <button class="btn-primary-sm" data-add-url="${name}">Add</button>
+        <button class="btn-primary-sm" data-cloud-url="${name}" data-multi="1" title="Pick from R2 storage">☁</button>
       </div>`;
   } else {
     if (existing) {
@@ -321,6 +322,7 @@ function renderImageUpload(name, spec, isMulti) {
     <div class="url-input-row">
       <input type="url" placeholder="Or paste URL..." id="urlInput_${name}">
       <button class="btn-primary-sm" data-use-url="${name}">Use URL</button>
+      <button class="btn-primary-sm" data-cloud-url="${name}" title="Pick from R2 storage">☁</button>
     </div>`;
   }
 }
@@ -973,6 +975,26 @@ function setupEventListeners() {
     });
   }
 
+  // Cloud picker (R2) button in upload modal
+  const cloudBtn = document.getElementById('btnCloudPick');
+  if (cloudBtn) {
+    cloudBtn.addEventListener('click', () => {
+      if (!uploadTarget) return;
+      openCloudPicker((url) => cloudApplyToUploadModal(url));
+    });
+  }
+
+  // Cloud picker buttons on per-param URL rows (single + multi). Delegated —
+  // rows re-render often, so a single document listener covers them all.
+  document.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-cloud-url]');
+    if (!b) return;
+    const name = b.dataset.cloudUrl;
+    const isMulti = b.dataset.multi === '1';
+    if (!name) return;
+    openCloudPicker((url) => cloudApplyToParam(name, isMulti, url));
+  });
+
   // Drop zone in modal
   const dropZone = document.getElementById('dropZone');
   if (dropZone) {
@@ -985,4 +1007,283 @@ function setupEventListeners() {
       if (file && uploadTarget) uploadFile(file, uploadTarget.paramName);
     });
   }
+}
+
+// ── Cloud storage picker ──
+// Browse the shared R2 bucket (genai-assets) as an input source alongside
+// local files. Picking resolves the key server-side into a presigned URL
+// WaveSpeed's servers can fetch, then applies it like a pasted URL.
+const cloudPicker = { prefix: '', flat: true, filter: 'all', folders: [], objects: [], cursor: null, truncated: false, selected: null, onPick: null, shown: 48 };
+function cloudKind(key) {
+  const m = String(key || '').toLowerCase().match(/\.([a-z0-9]{2,5})$/);
+  const e = m ? m[1] : '';
+  if (['jpg', 'jpeg', 'png', 'webp', 'gif', 'avif', 'svg', 'bmp'].includes(e)) return 'image';
+  if (['mp4', 'webm', 'mov', 'm4v'].includes(e)) return 'video';
+  if (['mp3', 'wav', 'ogg', 'm4a', 'flac'].includes(e)) return 'audio';
+  return 'other';
+}
+function cloudFileUrl(key) { return '/api/cloud/file?key=' + encodeURIComponent(key); }
+function cloudBaseName(key) { const p = String(key || '').split('/'); return p[p.length - 1] || key; }
+function cloudFmtSize(b) {
+  b = Number(b || 0);
+  if (b < 1024) return b + ' B';
+  if (b < 1048576) return (b / 1024).toFixed(1) + ' KB';
+  if (b < 1073741824) return (b / 1048576).toFixed(1) + ' MB';
+  return (b / 1073741824).toFixed(2) + ' GB';
+}
+function cloudEsc(s) { return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+function ensureCloudModal() {
+  if (document.getElementById('cloudModal')) return;
+  if (!document.getElementById('cloudPickerCss')) {
+    const st = document.createElement('style');
+    st.id = 'cloudPickerCss';
+    st.textContent = '.cloud-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:.5rem;overflow-y:auto;padding:.25rem;min-height:200px;max-height:46vh}' +
+      '.cloud-card{background:#1f2937;border:1px solid #374151;border-radius:.5rem;overflow:hidden;cursor:pointer}' +
+      '.cloud-card:hover{border-color:#10b981}.cloud-card.sel{border-color:#10b981;box-shadow:0 0 0 1px #10b981}' +
+      '.cloud-thumb{width:100%;height:90px;object-fit:cover;display:block;background:#030712}' +
+      '.cloud-folder{display:flex;align-items:center;justify-content:center;height:90px;font-size:1.8rem;background:#030712}' +
+      '.cloud-meta{padding:.3rem .45rem;font-size:.68rem;color:#d1d5db}' +
+      '.cloud-ph{animation:cloudpulse 1.4s ease-in-out infinite}' +
+      '@keyframes cloudpulse{0%,100%{opacity:.45}50%{opacity:.95}}';
+    document.head.appendChild(st);
+  }
+  document.body.insertAdjacentHTML('beforeend',
+    '<div id="cloudModal" style="display:none;position:fixed;inset:0;z-index:300;align-items:center;justify-content:center;background:rgba(0,0,0,.72)">' +
+    '<div style="background:#111827;border:1px solid #374151;border-radius:.75rem;width:94vw;max-width:880px;max-height:90vh;display:flex;flex-direction:column;overflow:hidden">' +
+    '<div class="flex items-center gap-2 px-4 py-3" style="border-bottom:1px solid #374151"><span class="font-semibold">☁ R2 storage</span><span id="cloudCount" class="text-xs" style="color:#9ca3af"></span><span class="flex-1"></span><button id="cloudClose" class="btn-secondary" type="button">✕</button></div>' +
+    '<div class="flex flex-wrap items-center gap-2 px-4 py-2 text-sm"><div id="cloudCrumbs" class="flex items-center gap-1 text-sm"></div><span class="flex-1"></span>' +
+    '<select id="cloudFilter" class="input" style="width:auto;padding:.2rem .4rem"><option value="all">All</option><option value="image">Images</option><option value="video">Videos</option><option value="audio">Audio</option><option value="other">Other</option></select>' +
+    '<button id="cloudFlat" class="btn-secondary" type="button" title="Flat view: everything below, no digging">⤵ Flat</button></div>' +
+    '<div id="cloudGrid" class="cloud-grid"></div>' +
+    '<div class="flex flex-wrap items-center gap-2 px-4 py-3 text-sm" style="border-top:1px solid #374151"><span id="cloudSel" class="truncate" style="max-width:55%;color:#9ca3af">select a file…</span><span id="cloudStatus" class="text-xs" style="color:#9ca3af"></span><span class="flex-1"></span>' +
+    '<button id="cloudCancel" class="btn-secondary" type="button">Cancel</button><button id="cloudUse" class="btn-primary-sm" type="button" disabled>Use this file</button></div>' +
+    '</div></div>');
+  document.getElementById('cloudClose').addEventListener('click', closeCloudPicker);
+  document.getElementById('cloudCancel').addEventListener('click', closeCloudPicker);
+  document.getElementById('cloudFlat').addEventListener('click', () => {
+    cloudPicker.flat = !cloudPicker.flat;
+    document.getElementById('cloudFlat').style.borderColor = cloudPicker.flat ? '#10b981' : '';
+    cloudLoad(false);
+  });
+  document.getElementById('cloudFilter').addEventListener('change', (e) => { cloudPicker.filter = e.target.value; cloudPicker.shown = 48; cloudRender(); });
+  document.getElementById('cloudCrumbs').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-crumb]');
+    if (b) { cloudPicker.prefix = b.dataset.crumb; cloudLoad(false); }
+  });
+  document.getElementById('cloudUse').addEventListener('click', cloudResolveSelected);
+}
+function openCloudPicker(onPick) {
+  ensureCloudModal();
+  Object.assign(cloudPicker, { prefix: '', folders: [], objects: [], cursor: null, truncated: false, selected: null, shown: 48, onPick });
+  document.getElementById('cloudFilter').value = 'all';
+  cloudPicker.filter = 'all';
+  document.getElementById('cloudFlat').style.borderColor = '#10b981';
+  document.getElementById('cloudModal').style.display = 'flex';
+  cloudLoad(false);
+}
+function closeCloudPicker() {
+  const m = document.getElementById('cloudModal');
+  if (m) m.style.display = 'none';
+  cloudPicker.onPick = null;
+}
+async function cloudLoad(more) {
+  const st = cloudPicker;
+  cloudStatus('loading…');
+  try {
+    let q = '/api/cloud/list?prefix=' + encodeURIComponent(st.prefix) + (st.flat ? '&recursive=1' : '&delimiter=/');
+    if (more && st.cursor) q += '&cursor=' + encodeURIComponent(st.cursor);
+    const r = await fetch(q);
+    if (r.status === 401) throw new Error('Access login required.');
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+    st.folders = j.folders || [];
+    st.objects = more ? st.objects.concat(j.objects || []) : (j.objects || []);
+    st.truncated = !!j.truncated;
+    st.cursor = j.cursor || null;
+    if (!more) st.shown = 48;
+    cloudStatus('');
+    cloudRender();
+  } catch (e) { cloudStatus('error: ' + e.message); }
+}
+function cloudStatus(t) { const el = document.getElementById('cloudStatus'); if (el) el.textContent = t || ''; }
+function cloudRender() {
+  const st = cloudPicker;
+  const grid = document.getElementById('cloudGrid');
+  const segs = st.prefix.split('/').filter(Boolean);
+  let crumbs = '<button class="btn-secondary" data-crumb="">root</button>';
+  let acc = '';
+  segs.forEach((s) => { acc += s + '/'; crumbs += ' / <button class="btn-secondary" data-crumb="' + cloudEsc(acc) + '">' + cloudEsc(s) + '</button>'; });
+  document.getElementById('cloudCrumbs').innerHTML = crumbs;
+  const all = st.objects.filter((o) => st.filter === 'all' || cloudKind(o.key) === st.filter);
+  const files = all.slice(0, st.shown);
+  const folders = (st.filter === 'all' && !st.flat) ? st.folders : [];
+  document.getElementById('cloudCount').textContent = st.objects.length + ' files' + (st.flat ? ' (flat)' : '');
+  let html = '';
+  folders.forEach((f) => {
+    const nm = f.slice(0, -1).split('/').pop() + '/';
+    html += '<div class="cloud-card" data-folder="' + cloudEsc(f) + '"><div class="cloud-folder">📁</div><div class="cloud-meta"><div class="truncate">' + cloudEsc(nm) + '</div></div></div>';
+  });
+  files.forEach((o) => {
+    const kind = cloudKind(o.key), u = cloudFileUrl(o.key);
+    let thumb;
+    if (kind === 'image') thumb = '<img class="cloud-thumb cloud-ph" data-thumb data-src="' + u + '" alt="" />';
+    else if (kind === 'video') thumb = '<div class="cloud-folder cloud-ph" data-thumb>🎬</div>';
+    else thumb = '<div class="cloud-folder">' + (kind === 'audio' ? '🎵' : '📄') + '</div>';
+    html += '<div class="cloud-card' + (st.selected === o.key ? ' sel' : '') + '" data-key="' + cloudEsc(o.key) + '" data-kind="' + kind + '">' + thumb +
+      '<div class="cloud-meta"><div class="truncate" title="' + cloudEsc(o.key) + '">' + cloudEsc(cloudBaseName(o.key)) + '</div><div style="color:#6b7280">' + cloudFmtSize(o.size) + '</div></div></div>';
+  });
+  if (!folders.length && !files.length) html += '<div class="text-sm" style="color:#6b7280">empty</div>';
+  if (all.length > files.length) html += '<div style="grid-column:1/-1"><button class="btn-secondary" id="cloudShowMore" type="button">Show more (' + files.length + ' of ' + all.length + ')…</button></div>';
+  if (st.truncated) html += '<div style="grid-column:1/-1"><button class="btn-secondary" id="cloudFetchMore" type="button">Load more from storage…</button></div>';
+  grid.innerHTML = html;
+  cloudObserve(grid);
+}
+document.addEventListener('click', (e) => {
+  const more = e.target.closest('#cloudShowMore');
+  if (more) { cloudPicker.shown += 48; cloudRender(); return; }
+  const fetch = e.target.closest('#cloudFetchMore');
+  if (fetch) { cloudLoad(true); return; }
+  const f = e.target.closest('#cloudGrid [data-folder]');
+  if (f) { cloudPicker.prefix = f.dataset.folder; cloudLoad(false); return; }
+  const c = e.target.closest('#cloudGrid [data-key]');
+  if (c) {
+    cloudPicker.selected = c.dataset.key;
+    document.querySelectorAll('#cloudGrid .cloud-card.sel').forEach((x) => x.classList.remove('sel'));
+    c.classList.add('sel');
+    document.getElementById('cloudSel').textContent = c.dataset.key;
+    document.getElementById('cloudUse').disabled = false;
+  }
+});
+async function cloudResolveSelected() {
+  const key = cloudPicker.selected;
+  if (!key) return;
+  const btn = document.getElementById('cloudUse');
+  btn.disabled = true;
+  cloudStatus('resolving…');
+  try {
+    const r = await fetch('/api/cloud/resolve', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key }) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || !j.url) throw new Error(j.error || ('HTTP ' + r.status));
+    cloudStatus('ready ✓ (' + (j.via || 'ok') + (j.expiresIn ? ', link valid ' + Math.round(j.expiresIn / 3600) + 'h' : '') + ')');
+    const cb = cloudPicker.onPick;
+    if (cb) cb(j.url, key);
+  } catch (e) { cloudStatus('resolve failed: ' + e.message); btn.disabled = false; }
+}
+const cloudThumbObs = ('IntersectionObserver' in window) ? new IntersectionObserver((ents) => {
+  for (const en of ents) { if (en.isIntersecting) { cloudThumbObs.unobserve(en.target); cloudLoadThumb(en.target); } }
+}, { rootMargin: '200px' }) : null;
+const cloudThumbQueue = [];
+let cloudThumbActive = 0;
+function cloudPump() {
+  let n = cloudThumbQueue.length;
+  while (cloudThumbActive < 3 && cloudThumbQueue.length && n-- > 0) {
+    const job = cloudThumbQueue.shift();
+    if (!job.el.isConnected) continue;
+    try {
+      const r = job.el.getBoundingClientRect();
+      if (r.bottom < -400 || r.top > (window.innerHeight + 400)) { job.tries = (job.tries || 0) + 1; if (job.tries < 15) cloudThumbQueue.push(job); continue; }
+    } catch {}
+    cloudThumbActive++;
+    job.el.dataset.done = '1';
+    cloudCapture(job.el).catch(() => {}).finally(() => { cloudThumbActive--; cloudPump(); });
+  }
+}
+function cloudObserve(root) {
+  const els = root.querySelectorAll('[data-thumb]:not([data-done])');
+  if (!cloudThumbObs) { els.forEach(cloudLoadThumb); return; }
+  els.forEach((el) => cloudThumbObs.observe(el));
+}
+function cloudLoadThumb(el) {
+  if (!el || el.dataset.done) return;
+  const card = el.closest('[data-kind]');
+  const kind = card ? card.dataset.kind : '';
+  const key = card ? card.dataset.key : '';
+  if (!key) return;
+  if (kind === 'image') {
+    if (el.tagName === 'IMG') {
+      el.dataset.done = '1';
+      el.addEventListener('load', () => el.classList.remove('cloud-ph'), { once: true });
+      el.addEventListener('error', () => el.classList.remove('cloud-ph'), { once: true });
+      el.src = el.dataset.src;
+    }
+    return;
+  }
+  if (kind === 'video') { cloudThumbQueue.push({ el, tries: 0 }); cloudPump(); }
+}
+async function cloudCapture(el) {
+  const card = el.closest('[data-kind]');
+  const key = card ? card.dataset.key : '';
+  if (!key || !el.isConnected) return;
+  const url = cloudFileUrl(key);
+  const dataUrl = await new Promise((resolve) => {
+    let done = false;
+    const finish = (d) => { if (done) return; done = true; try { v.removeAttribute('src'); v.load(); } catch {} resolve(d || null); };
+    const v = document.createElement('video');
+    v.muted = true; v.playsInline = true; v.preload = 'metadata'; v.src = url;
+    const to = setTimeout(() => finish(null), 10000);
+    const grab = () => {
+      if (done) return; clearTimeout(to);
+      let out = null;
+      try {
+        const w = v.videoWidth, h = v.videoHeight;
+        if (w && h) {
+          const s = Math.min(1, 240 / w);
+          const c = document.createElement('canvas');
+          c.width = Math.max(2, Math.round(w * s)); c.height = Math.max(2, Math.round(h * s));
+          c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
+          out = c.toDataURL('image/jpeg', 0.7);
+        }
+      } catch {}
+      finish(out);
+    };
+    v.addEventListener('loadeddata', () => {
+      try {
+        const t = (Number.isFinite(v.duration) && v.duration > 1) ? Math.min(0.5, v.duration / 3) : 0;
+        if (t > 0.05) { v.addEventListener('seeked', grab, { once: true }); try { v.currentTime = t; } catch { grab(); } setTimeout(grab, 4000); }
+        else grab();
+      } catch { grab(); }
+    }, { once: true });
+    v.addEventListener('error', () => { clearTimeout(to); finish(null); }, { once: true });
+  });
+  if (!el.isConnected) return;
+  if (dataUrl) {
+    const img = document.createElement('img');
+    img.className = 'cloud-thumb'; img.alt = ''; img.src = dataUrl;
+    el.replaceWith(img);
+  } else { el.classList.remove('cloud-ph'); }
+}
+// Apply a resolved cloud URL to the upload modal's target param.
+function cloudApplyToUploadModal(url) {
+  if (!uploadTarget) return;
+  const nm = uploadTarget.paramName;
+  document.getElementById('uploadPreviewImg').src = url;
+  document.getElementById('uploadPreview').classList.remove('hidden');
+  const st = document.getElementById('uploadStatus');
+  st.textContent = 'Cloud file ready ✓ (presigned link, valid 24h — generate promptly)';
+  st.className = 'text-xs text-green-400 mt-2';
+  const c = document.getElementById('btnConfirmUpload');
+  c.classList.remove('hidden');
+  c.onclick = () => {
+    if (uploadTarget.isMulti) {
+      if (!uploadedImages[nm]) uploadedImages[nm] = [];
+      uploadedImages[nm].push(url);
+      currentParams[nm] = [...uploadedImages[nm]];
+    } else { uploadedImages[nm] = url; currentParams[nm] = url; }
+    closeCloudPicker();
+    closeUploadModal();
+    renderParams(currentSchema);
+    updatePayloadPreview();
+  };
+}
+// Apply a resolved cloud URL straight to a per-param URL row.
+function cloudApplyToParam(name, isMulti, url) {
+  if (!name) return;
+  if (isMulti) {
+    if (!uploadedImages[name]) uploadedImages[name] = [];
+    uploadedImages[name].push(url);
+    currentParams[name] = [...uploadedImages[name]];
+  } else { uploadedImages[name] = url; currentParams[name] = url; }
+  closeCloudPicker();
+  renderParams(currentSchema);
+  updatePayloadPreview();
 }

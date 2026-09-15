@@ -14,7 +14,7 @@
 
 const WAVESPEED_BASE = 'https://api.wavespeed.ai/api/v3';
 
-const PROTECTED_API_PREFIXES = ['/api/generate', '/api/upload', '/api/predictions', '/api/sync', '/api/enhance', '/api/optimize', '/api/llm-config', '/api/prompts', '/api/wavespeed', '/api/history'];
+const PROTECTED_API_PREFIXES = ['/api/generate', '/api/upload', '/api/predictions', '/api/sync', '/api/enhance', '/api/optimize', '/api/llm-config', '/api/prompts', '/api/wavespeed', '/api/cloud', '/api/history'];
 
 const DEFAULT_LLM_PROVIDERS = [
   { baseUrl: 'https://openrouter.ai/api/v1', model: 'liquid/lfm-2.5-2.6b:free', apiKey: '' },
@@ -808,6 +808,74 @@ async function handleApiRoute(request, env, path, ctx) {
   // WaveSpeed CDN URLs expire. The browser POSTs output URLs here right after a
   // run succeeds; the Worker fetches each URL server-side and streams it to R2,
   // then links the R2 keys back to the run row via jobId.
+  // ─── Cloud storage picker (R2 as a second input source; local upload unchanged) ───
+  // Browse genai-assets and resolve a key into a time-limited presigned GET URL
+  // that WaveSpeed's servers can fetch (their API only accepts public URLs).
+  // Needs R2 API token secrets (R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY) plus
+  // R2_ACCOUNT_ID / R2_BUCKET vars; without them resolve explains the setup.
+  if (path === '/api/cloud/list' && request.method === 'GET') {
+    if (!env.OUTPUTS_BUCKET) return jsonResponse({ configured: false }, 500);
+    const q = new URL(request.url).searchParams;
+    const prefix = q.get('prefix') || '';
+    const recursive = q.get('recursive') === '1';
+    const listed = await env.OUTPUTS_BUCKET.list({
+      prefix, delimiter: recursive ? undefined : (q.get('delimiter') || '/'),
+      cursor: q.get('cursor') || undefined, limit: 1000,
+    });
+    return jsonResponse({
+      configured: true, prefix, recursive,
+      folders: listed.delimitedPrefixes || [],
+      objects: (listed.objects || []).map((o) => ({ key: o.key, size: o.size, uploaded: o.uploaded })),
+      truncated: !!listed.truncated, cursor: listed.truncated ? (listed.cursor || null) : null,
+    });
+  }
+  if (path === '/api/cloud/file' && request.method === 'GET') {
+    if (!env.OUTPUTS_BUCKET) return jsonResponse({ configured: false }, 500);
+    const key = (new URL(request.url).searchParams.get('key') || '').replace(/^\/+/, '');
+    if (!key) return jsonResponse({ error: 'key required' }, 400);
+    const obj = await env.OUTPUTS_BUCKET.get(key);
+    if (!obj) return jsonResponse({ error: 'not found' }, 404);
+    const ct = cloudContentType(key, obj.httpMetadata?.contentType);
+    const range = request.headers.get('range');
+    if (range) {
+      const m = /^bytes=(\d*)-(\d*)$/.exec(range.trim());
+      if (m) {
+        const size = obj.size;
+        let start = m[1] === '' ? null : parseInt(m[1], 10);
+        let end = m[2] === '' ? null : parseInt(m[2], 10);
+        if (start === null && end !== null) { start = Math.max(0, size - end); end = size - 1; }
+        else if (start !== null && end === null) { end = size - 1; }
+        if (start !== null && end !== null && Number.isFinite(start) && Number.isFinite(end) && start <= end && start < size) {
+          end = Math.min(end, size - 1);
+          const ranged = await env.OUTPUTS_BUCKET.get(key, { range: { offset: start, length: end - start + 1 } });
+          if (ranged) {
+            return new Response(ranged.body, { status: 206, headers: {
+              'Content-Type': ct, 'Accept-Ranges': 'bytes',
+              'Content-Range': 'bytes ' + start + '-' + end + '/' + size,
+              'Content-Length': String(end - start + 1) } });
+          }
+        } else {
+          return new Response('Requested Range Not Satisfiable', { status: 416, headers: { 'Content-Range': 'bytes */' + obj.size } });
+        }
+      }
+    }
+    return new Response(obj.body, { headers: { 'Content-Type': ct, 'Accept-Ranges': 'bytes', 'Content-Length': String(obj.size) } });
+  }
+  if (path === '/api/cloud/resolve' && request.method === 'POST') {
+    if (!env.OUTPUTS_BUCKET) return jsonResponse({ error: 'R2 not configured on Worker' }, 500);
+    let body; try { body = await request.json(); } catch { return jsonResponse({ error: 'Invalid JSON' }, 400); }
+    const key = String(body.key || '').replace(/^\/+/, '');
+    if (!key) return jsonResponse({ error: 'key required' }, 400);
+    const obj = await env.OUTPUTS_BUCKET.head(key);
+    if (!obj) return jsonResponse({ error: 'not found' }, 404);
+    const exp = Math.min(Math.max(parseInt(body.expiresIn, 10) || 86400, 60), 604800);
+    try {
+      const presigned = await r2PresignGet(env, key, exp);
+      return jsonResponse({ url: presigned.url, key, via: 'presigned-url', expiresIn: presigned.expiresIn });
+    } catch (e) {
+      return jsonResponse({ error: String((e && e.message) || e) }, 500);
+    }
+  }
   if (path === '/api/wavespeed/save-outputs' && request.method === 'POST') {
     if (!env.OUTPUTS_BUCKET) return jsonResponse({ error: 'R2 not configured on Worker', configured: false }, 500);
     let body; try { body = await request.json(); } catch { return jsonResponse({ error: 'Invalid JSON' }, 400); }
@@ -1095,4 +1163,53 @@ function jsonResponse(data, status = 200, extraHeaders = {}) {
       ...extraHeaders,
     },
   });
+}
+
+// Extension → content-type fallback for R2 objects stored as octet-stream.
+const CLOUD_EXT_CT = {
+  jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp',
+  gif: 'image/gif', avif: 'image/avif', svg: 'image/svg+xml', bmp: 'image/bmp',
+  mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime', m4v: 'video/x-m4v',
+  mp3: 'audio/mpeg', wav: 'audio/wav', ogg: 'audio/ogg', m4a: 'audio/mp4', flac: 'audio/flac',
+};
+function cloudContentType(key, stored) {
+  if (stored && stored !== 'application/octet-stream') return stored;
+  const m = String(key || '').split('?')[0].match(/\.([a-z0-9]{2,5})$/i);
+  return (m && CLOUD_EXT_CT[m[1].toLowerCase()]) || stored || 'application/octet-stream';
+}
+
+// SigV4 presigned GET URL for an R2 object (works on the default
+// <account>.r2.cloudflarestorage.com endpoint — no custom domain needed).
+// R2 uses region 'auto'. Throws with a setup hint when secrets are missing.
+async function r2PresignGet(env, key, expiresIn) {
+  const accessKey = env.R2_ACCESS_KEY_ID, secret = env.R2_SECRET_ACCESS_KEY;
+  const accountId = env.R2_ACCOUNT_ID, bucket = env.R2_BUCKET || 'genai-assets';
+  if (!accessKey || !secret || !accountId) {
+    throw new Error('R2 API token not configured. Create a read-only token at dash.cloudflare.com → R2 → API Tokens, then: wrangler secret put R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY (plus R2_ACCOUNT_ID var).');
+  }
+  const enc = new TextEncoder();
+  const hex = (buf) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
+  const sha256hex = async (data) => hex(await crypto.subtle.digest('SHA-256', typeof data === 'string' ? enc.encode(data) : data));
+  const hmac = async (keyBytes, data) => crypto.subtle.sign('HMAC', await crypto.subtle.importKey('raw', keyBytes, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']), typeof data === 'string' ? enc.encode(data) : data);
+  const host = `${accountId}.r2.cloudflarestorage.com`;
+  const uriPath = `/${bucket}/` + String(key).split('/').map((s) => encodeURIComponent(s)).join('/');
+  const amzDate = new Date().toISOString().replace(/[-:]/g, '').slice(0, 15) + 'Z';
+  const dateStamp = amzDate.slice(0, 8);
+  const scope = `${dateStamp}/auto/s3/aws4_request`;
+  const qp = new URLSearchParams({
+    'X-Amz-Algorithm': 'AWS4-HMAC-SHA256',
+    'X-Amz-Credential': `${accessKey}/${scope}`,
+    'X-Amz-Date': amzDate,
+    'X-Amz-Expires': String(expiresIn),
+    'X-Amz-SignedHeaders': 'host',
+  });
+  const canonicalQuery = qp.toString();
+  const canonicalReq = ['GET', uriPath, canonicalQuery, `host:${host}`, '', 'host', 'UNSIGNED-PAYLOAD'].join('\n');
+  const stringToSign = ['AWS4-HMAC-SHA256', amzDate, scope, await sha256hex(canonicalReq)].join('\n');
+  const kDate = await hmac(enc.encode('AWS4' + secret), dateStamp);
+  const kRegion = await hmac(kDate, 'auto');
+  const kService = await hmac(kRegion, 's3');
+  const kSign = await hmac(kService, 'aws4_request');
+  const sig = hex(await hmac(kSign, stringToSign));
+  return { url: `https://${host}${uriPath}?${canonicalQuery}&X-Amz-Signature=${sig}`, expiresIn };
 }

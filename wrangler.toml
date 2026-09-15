@@ -21,3 +21,7 @@ bucket_name = "genai-assets"
 
 [vars]
 WAVESPEED_BASE_URL = "https://api.wavespeed.ai/api/v3"
+# R2 presigned URLs for cloud file picker (worker fetches nothing; provider pulls directly).
+# Secrets R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY via `wrangler secret put`.
+R2_ACCOUNT_ID = "3e37b0a010de20bc7fc5b6c9d0dcb285"
+R2_BUCKET = "genai-assets"
