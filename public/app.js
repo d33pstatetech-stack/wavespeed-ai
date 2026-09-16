@@ -748,12 +748,24 @@ function addToHistory(requestId, outputs, cost, elapsed) {
   saveHistory();
   renderHistory();
   // Auto-save outputs to R2 (genai-assets) so expiring WaveSpeed CDN URLs stay
-  // linked in shared history — fire-and-forget, display keeps CDN URLs.
+  // linked in shared history — runs in background, status shown in output meta.
   try {
     const urls = (outputs || []).filter((u) => typeof u === 'string' && /^https?:\/\//.test(u)).slice(0, 10);
     if (urls.length) {
+      const meta = document.getElementById('outputMeta');
+      const span = document.createElement('span');
+      span.id = 'archStatus';
+      span.innerHTML = '<i class="fas fa-cloud-upload-alt"></i> archiving…';
+      if (meta) meta.appendChild(span);
       fetch(`${API}/wavespeed/save-outputs`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ urls, model: currentModel?.id, jobId: requestId }) }).catch(() => {});
+        body: JSON.stringify({ urls, model: currentModel?.id, jobId: requestId }) })
+        .then((r) => r.json().catch(() => ({})))
+        .then((j) => {
+          const ok = (j.saved || []).length;
+          if (span) span.innerHTML = ok ? `<i class="fas fa-cloud"></i> archived ✓ (${ok}/${urls.length})` : '<i class="fas fa-exclamation-triangle"></i> archive failed';
+          if (!ok && typeof showToast === 'function') showToast('R2 auto-archive failed — CDN link will expire!', 'error');
+        })
+        .catch(() => { if (span) span.innerHTML = '<i class="fas fa-exclamation-triangle"></i> archive failed'; });
     }
   } catch {}
 }
