@@ -261,12 +261,15 @@ function renderParams(schema) {
         <input type="checkbox" data-param="${name}" ${def ? 'checked' : ''} class="accent-purple-500">
         <span class="text-xs text-gray-400">${def ? 'Enabled' : 'Disabled'}</span>
       </label>`;
+    } else if (spec.type === 'array' && isLoraParam(name, spec)) {
+      const defArr = Array.isArray(schema.defaults?.[name]) ? schema.defaults[name].join('\n') : (schema.defaults?.[name] ?? spec.default ?? '');
+      control = `<textarea class="input" data-param="${name}" rows="2" placeholder="One LoRA per line (commas also work)">${defArr}</textarea>`;
     } else {
       const def = schema.defaults?.[name] ?? spec.default ?? '';
       control = `<input type="text" class="input" data-param="${name}" value="${def}" placeholder="${spec.title || name}">`;
     }
 
-    group.innerHTML = label + control + desc;
+    group.innerHTML = label + control + desc + paramHint(name, spec);
     form.appendChild(group);
 
     // Wire up events
@@ -283,6 +286,66 @@ function getParamType(name, spec) {
   if (spec.type === 'number') return 'number';
   if (spec.type === 'boolean') return 'boolean';
   return 'string';
+}
+
+// ── LoRA + size field hints & soft validation (warns, never blocks) ──
+const LORA_PROVIDER = 'wavespeed';
+function isLoraParam(name, spec) {
+  const n = String(name || '').toLowerCase();
+  if (n === 'extra_lora' || n === 'extra_lora_weights' || /(^|_)replicate_weights$/.test(n)) return true;
+  if (/scale|strength|weight|multiplier/.test(n)) return false;
+  if (/lora|loras|adapter/.test(n)) return true;
+  return false;
+}
+function loraHintText() {
+  return 'LoRA: <b>owner/repo</b>, full <b>https://….safetensors</b> URL, or Civitai link — max 3, one per line (commas also work). Strength is set separately, not here.';
+}
+function sizeHintText() {
+  const mid = (typeof currentModel !== 'undefined' && currentModel && currentModel.id) || '';
+  const capped = /qwen/i.test(mid) && /2512/.test(mid);
+  return 'Format: <b>width*height</b> (e.g. 1024*1024).' + (capped ? ' Each side max <b>1536px</b>.' : ' Limits vary by model.');
+}
+function paramHint(name, spec) {
+  const n = String(name || '').toLowerCase();
+  const hasOpts = !!(spec && spec.options && spec.options.length);
+  if ((n === 'size' || n === 'resolution') && !hasOpts && (!spec || spec.type === 'string' || spec.type === undefined)) {
+    return `<p class="param-hint">${sizeHintText()}</p>`;
+  }
+  if (isLoraParam(name, spec)) {
+    return `<p class="param-hint">${loraHintText()}</p><p class="lora-warn" data-lorawarn="${name}" style="display:none"></p>`;
+  }
+  return '';
+}
+function loraTokenIssues(tok) {
+  const t = String(tok || '').trim();
+  if (!t) return null;
+  if (/^https?:\/\//i.test(t)) {
+    if (/civitai\.com/i.test(t)) return null; // model-page links resolve provider-side
+    if (!/\.safetensors(\?|#|$)/i.test(t)) return 'URL should point to a .safetensors file';
+    return null;
+  }
+  if (/^huggingface\.co\//i.test(t) || /^civitai\.com\//i.test(t)) return null;
+  if (/^[^/\s]+\/[^/\s]+$/.test(t)) return null; // HF short form owner/repo
+  return 'unrecognized format — a full https://….safetensors URL is safest';
+}
+function validateLoraInput(input) {
+  try {
+    const group = input.closest('.param-group');
+    const warn = group ? group.querySelector('[data-lorawarn]') : null;
+    if (!warn) return;
+    const toks = (input.tagName === 'TEXTAREA' ? input.value.split(/[\n,]+/) : [input.value]);
+    const seen = [];
+    toks.map((s) => s.trim()).filter(Boolean).forEach((t) => {
+      const iss = loraTokenIssues(t);
+      if (iss) {
+        const short = t.length > 44 ? t.slice(0, 44) + '…' : t;
+        const msg = '\u201c' + short + '\u201d: ' + iss;
+        if (seen.indexOf(msg) < 0) seen.push(msg);
+      }
+    });
+    warn.style.display = seen.length ? '' : 'none';
+    warn.textContent = seen.length ? '\u26a0 ' + seen.join(' · ') : '';
+  } catch {}
 }
 
 function renderImageUpload(name, spec, isMulti) {
@@ -415,6 +478,11 @@ function wireParamEvents(group, name, spec, pType) {
     };
     input.addEventListener('input', handler);
     input.addEventListener('change', handler);
+    // Soft LoRA format check — red hint only, never blocks submit.
+    if (isLoraParam(name, spec) && (input.tagName === 'TEXTAREA' || input.type === 'text')) {
+      input.addEventListener('input', () => validateLoraInput(input));
+      validateLoraInput(input);
+    }
   }
 }
 

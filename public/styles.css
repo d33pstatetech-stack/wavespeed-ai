@@ -273,6 +273,25 @@ body {
   line-height: 1.4;
 }
 
+.param-hint {
+  font-size: 11px;
+  color: #6b7280;
+  margin-top: 4px;
+  line-height: 1.4;
+}
+
+.param-hint b {
+  color: #9ca3af;
+  font-weight: 600;
+}
+
+.lora-warn {
+  font-size: 11px;
+  color: #f87171;
+  margin-top: 4px;
+  line-height: 1.4;
+}
+
 .param-range-row {
   display: flex;
   align-items: center;
