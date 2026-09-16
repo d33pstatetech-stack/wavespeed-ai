@@ -292,6 +292,46 @@ body {
   line-height: 1.4;
 }
 
+.lora-slots {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.lora-slot-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+}
+
+.lora-scale-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.lora-scale-row input[type="range"] {
+  flex: 1;
+}
+
+.lora-scale-label {
+  font-size: 10px;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.lora-scale-val {
+  font-size: 11px;
+  color: #9ca3af;
+  min-width: 32px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
 .param-range-row {
   display: flex;
   align-items: center;

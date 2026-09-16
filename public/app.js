@@ -262,8 +262,7 @@ function renderParams(schema) {
         <span class="text-xs text-gray-400">${def ? 'Enabled' : 'Disabled'}</span>
       </label>`;
     } else if (spec.type === 'array' && isLoraParam(name, spec)) {
-      const defArr = Array.isArray(schema.defaults?.[name]) ? schema.defaults[name].join('\n') : (schema.defaults?.[name] ?? spec.default ?? '');
-      control = `<textarea class="input" data-param="${name}" rows="2" placeholder="One LoRA per line (commas also work)">${defArr}</textarea>`;
+      control = renderLoraSlots(name, spec, schema);
     } else {
       const def = schema.defaults?.[name] ?? spec.default ?? '';
       control = `<input type="text" class="input" data-param="${name}" value="${def}" placeholder="${spec.title || name}">`;
@@ -346,6 +345,65 @@ function validateLoraInput(input) {
     warn.style.display = seen.length ? '' : 'none';
     warn.textContent = seen.length ? '\u26a0 ' + seen.join(' · ') : '';
   } catch {}
+}
+
+// ── Multi-LoRA slots: one text box + strength slider (0–2) per LoRA.
+// Assembles [{path, scale}] into currentParams so the API gets the right shape.
+function escAttr(s) { return String(s ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;'); }
+function loraSlotCount(spec) {
+  const m = /max\s*(\d+)/i.exec((spec && spec.description) || '');
+  const n = m ? parseInt(m[1], 10) : 3;
+  return Math.min(Math.max(n || 3, 1), 5);
+}
+function loraSlotPrefill(name) {
+  const cur = (typeof currentParams !== 'undefined' && currentParams) ? currentParams[name] : undefined;
+  if (Array.isArray(cur)) return cur.map((el) => (el && typeof el === 'object')
+    ? { path: el.path || el.url || '', scale: (typeof el.scale === 'number' ? el.scale : 1) }
+    : { path: String(el ?? ''), scale: 1 });
+  if (typeof cur === 'string' && cur.trim()) return [{ path: cur.trim(), scale: 1 }];
+  return [];
+}
+function renderLoraSlots(name, spec, schema) {
+  const n = loraSlotCount(spec);
+  const pre = loraSlotPrefill(name);
+  let h = `<div class="lora-slots" data-lora-slots="${name}">`;
+  for (let i = 0; i < n; i++) {
+    const p = pre[i] || { path: '', scale: 1 };
+    const sc = Math.min(2, Math.max(0, Number(p.scale) || 0));
+    h += `<div class="lora-slot-row">` +
+      `<input type="text" class="input" data-param="${name}" data-lora-slot="${i}" value="${escAttr(p.path)}" placeholder="LoRA ${i + 1}: HF owner/repo or https://….safetensors" />` +
+      `<div class="lora-scale-row"><span class="lora-scale-label">strength</span>` +
+      `<input type="range" data-lora-scale="${i}" min="0" max="2" step="0.05" value="${sc}" />` +
+      `<span class="lora-scale-val" data-lora-scaleval="${i}">${sc.toFixed(2)}</span></div></div>`;
+  }
+  return h + '</div>';
+}
+function wireLoraSlots(group, name) {
+  const box = group.querySelector(`[data-lora-slots="${name}"]`);
+  if (!box) return;
+  const update = () => {
+    const arr = [];
+    box.querySelectorAll('[data-lora-slot]').forEach((inp) => {
+      const i = inp.dataset.loraSlot;
+      const sEl = box.querySelector(`[data-lora-scale="${i}"]`);
+      const sc = sEl ? parseFloat(sEl.value) : 1;
+      const badge = box.querySelector(`[data-lora-scaleval="${i}"]`);
+      if (badge && sEl) badge.textContent = sc.toFixed(2);
+      const path = inp.value.trim();
+      if (path) arr.push({ path, scale: sc });
+    });
+    if (typeof currentParams !== 'undefined') {
+      if (arr.length) currentParams[name] = arr; else delete currentParams[name];
+    }
+    if (typeof updatePayloadPreview === 'function') updatePayloadPreview();
+    if (typeof debouncedCostEstimate === 'function') debouncedCostEstimate();
+  };
+  box.querySelectorAll('[data-lora-slot]').forEach((inp) => {
+    inp.addEventListener('input', () => { update(); validateLoraInput(inp); });
+    validateLoraInput(inp);
+  });
+  box.querySelectorAll('[data-lora-scale]').forEach((s) => s.addEventListener('input', update));
+  update();
 }
 
 function renderImageUpload(name, spec, isMulti) {
@@ -451,8 +509,8 @@ function wireParamEvents(group, name, spec, pType) {
     });
   });
 
-  // Standard inputs
-  const input = group.querySelector(`[data-param="${name}"]:not(.image-upload-zone)`);
+  // Standard inputs (slot inputs manage themselves via wireLoraSlots)
+  const input = group.querySelector(`[data-param="${name}"]:not(.image-upload-zone):not([data-lora-slot])`);
   if (input && !zone) {
     const handler = () => {
       let val;
@@ -484,6 +542,7 @@ function wireParamEvents(group, name, spec, pType) {
       validateLoraInput(input);
     }
   }
+  wireLoraSlots(group, name);
 }
 
 // ── Upload Modal ──
