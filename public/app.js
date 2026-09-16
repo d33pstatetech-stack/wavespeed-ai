@@ -298,7 +298,7 @@ function isLoraParam(name, spec) {
   return false;
 }
 function loraHintText() {
-  return 'LoRA: <b>owner/repo</b>, full <b>https://….safetensors</b> URL, or Civitai link — max 3, one per line (commas also work). Strength is set separately, not here.';
+  return 'LoRA: HuggingFace <b>owner/repo</b> (file must sit at the repo root, else use the full URL), full <b>https://….safetensors</b> URL, or Civitai model link — max 3, one per line (commas also work). Strength is set separately, not here.';
 }
 function sizeHintText() {
   const mid = (typeof currentModel !== 'undefined' && currentModel && currentModel.id) || '';
