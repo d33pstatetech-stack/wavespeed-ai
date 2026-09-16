@@ -1152,7 +1152,7 @@ function setupEventListeners() {
 // Browse the shared R2 bucket (genai-assets) as an input source alongside
 // local files. Picking resolves the key server-side into a presigned URL
 // WaveSpeed's servers can fetch, then applies it like a pasted URL.
-const cloudPicker = { prefix: '', flat: true, filter: 'all', folders: [], objects: [], cursor: null, truncated: false, selected: null, onPick: null, shown: 48 };
+const cloudPicker = { prefix: '', flat: false, filter: 'all', folders: [], objects: [], cursor: null, truncated: false, selected: null, onPick: null, shown: 48 };
 function cloudKind(key) {
   const m = String(key || '').toLowerCase().match(/\.([a-z0-9]{2,5})$/);
   const e = m ? m[1] : '';
@@ -1176,11 +1176,11 @@ function ensureCloudModal() {
   if (!document.getElementById('cloudPickerCss')) {
     const st = document.createElement('style');
     st.id = 'cloudPickerCss';
-    st.textContent = '.cloud-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:.5rem;overflow-y:auto;padding:.25rem;min-height:200px;max-height:46vh}' +
+    st.textContent = '.cloud-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:.5rem;overflow-y:auto;padding:.25rem;min-height:200px;max-height:46vh}' +
       '.cloud-card{background:#1f2937;border:1px solid #374151;border-radius:.5rem;overflow:hidden;cursor:pointer}' +
       '.cloud-card:hover{border-color:#10b981}.cloud-card.sel{border-color:#10b981;box-shadow:0 0 0 1px #10b981}' +
-      '.cloud-thumb{width:100%;height:90px;object-fit:cover;display:block;background:#030712}' +
-      '.cloud-folder{display:flex;align-items:center;justify-content:center;height:90px;font-size:1.8rem;background:#030712}' +
+      '.cloud-thumb{width:100%;height:130px;object-fit:cover;display:block;background:#030712}' +
+      '.cloud-folder{display:flex;align-items:center;justify-content:center;height:130px;font-size:1.8rem;background:#030712}' +
       '.cloud-meta{padding:.3rem .45rem;font-size:.68rem;color:#d1d5db}' +
       '.cloud-ph{animation:cloudpulse 1.4s ease-in-out infinite}' +
       '@keyframes cloudpulse{0%,100%{opacity:.45}50%{opacity:.95}}';
@@ -1213,10 +1213,10 @@ function ensureCloudModal() {
 }
 function openCloudPicker(onPick) {
   ensureCloudModal();
-  Object.assign(cloudPicker, { prefix: '', folders: [], objects: [], cursor: null, truncated: false, selected: null, shown: 48, onPick });
+  Object.assign(cloudPicker, { prefix: '', flat: false, folders: [], objects: [], cursor: null, truncated: false, selected: null, shown: 48, onPick });
   document.getElementById('cloudFilter').value = 'all';
   cloudPicker.filter = 'all';
-  document.getElementById('cloudFlat').style.borderColor = '#10b981';
+  document.getElementById('cloudFlat').style.borderColor = '';
   document.getElementById('cloudModal').style.display = 'flex';
   cloudLoad(false);
 }
