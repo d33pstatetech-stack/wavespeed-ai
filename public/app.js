@@ -889,8 +889,12 @@ function addToHistory(requestId, outputs, cost, elapsed) {
         .then((r) => r.json().catch(() => ({})))
         .then((j) => {
           const ok = (j.saved || []).length;
-          if (span) span.innerHTML = ok ? `<i class="fas fa-cloud"></i> archived ✓ (${ok}/${urls.length})` : '<i class="fas fa-exclamation-triangle"></i> archive failed';
-          if (!ok && typeof showToast === 'function') showToast('R2 auto-archive failed — CDN link will expire!', 'error');
+          const firstErr = j.errors && j.errors[0] && j.errors[0].error;
+          if (span) {
+            span.innerHTML = ok ? `<i class="fas fa-cloud"></i> archived ✓ (${ok}/${urls.length})` : '<i class="fas fa-exclamation-triangle"></i> archive failed';
+            if (!ok && firstErr) span.title = String(firstErr).slice(0, 300);
+          }
+          if (!ok && typeof showToast === 'function') showToast('R2 auto-archive failed' + (firstErr ? ': ' + String(firstErr).slice(0, 160) : ' — CDN link will expire!'), 'error');
         })
         .catch(() => { if (span) span.innerHTML = '<i class="fas fa-exclamation-triangle"></i> archive failed'; });
     }
@@ -1183,7 +1187,11 @@ function ensureCloudModal() {
       '.cloud-folder{display:flex;align-items:center;justify-content:center;height:130px;font-size:1.8rem;background:#030712}' +
       '.cloud-meta{padding:.3rem .45rem;font-size:.68rem;color:#d1d5db}' +
       '.cloud-ph{animation:cloudpulse 1.4s ease-in-out infinite}' +
-      '@keyframes cloudpulse{0%,100%{opacity:.45}50%{opacity:.95}}';
+      '@keyframes cloudpulse{0%,100%{opacity:.45}50%{opacity:.95}}' +
+      '.cloud-grid{align-content:start}' +
+      '.cloud-card{min-height:176px;display:flex;flex-direction:column}' +
+      '.cloud-thumb,.cloud-folder{flex:0 0 auto;min-height:130px}' +
+      '.cloud-meta{margin-top:auto}';
     document.head.appendChild(st);
   }
   document.body.insertAdjacentHTML('beforeend',
