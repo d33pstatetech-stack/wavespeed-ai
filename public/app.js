@@ -406,12 +406,33 @@ function wireLoraSlots(group, name) {
   update();
 }
 
+// Aspect-ratio badge on uploaded-image thumbs: overlay "W:H" + WxH tooltip.
+function imgRatioGcd(a, b) { a = Math.abs(a); b = Math.abs(b); while (b) { const t = a % b; a = b; b = t; } return a || 1; }
+function imgRatioStr(w, h) {
+  if (!w || !h) return '';
+  const g = imgRatioGcd(w, h), a = w / g, b = h / g;
+  if (a > 32 || b > 32) { const r = w / h; return r >= 1 ? r.toFixed(2) + ':1' : '1:' + (1 / r).toFixed(2); }
+  return a + ':' + b;
+}
+function paintImgRatio(img) {
+  try {
+    const w = img.naturalWidth, h = img.naturalHeight;
+    if (!w || !h) return;
+    const wrap = img.closest('.multi-image-thumb,.upload-preview,.relative');
+    const badge = wrap ? wrap.querySelector('.img-ratio') : null;
+    if (!badge) return;
+    badge.textContent = imgRatioStr(w, h);
+    badge.title = `${w}\u00d7${h}px`;
+    badge.classList.remove('hidden');
+  } catch (e) { /* badge is best-effort */ }
+}
+
 function renderImageUpload(name, spec, isMulti) {
   const existing = uploadedImages[name];
   if (isMulti) {
     const images = existing || [];
     let thumbsHtml = images.map((url, i) =>
-      `<div class="multi-image-thumb"><img src="${url}" alt=""><button class="remove-btn" data-param="${name}" data-idx="${i}"><i class="fas fa-times"></i></button></div>`
+      `<div class="multi-image-thumb"><img src="${url}" alt="" onload="paintImgRatio(this)"><span class="img-ratio hidden"></span><button class="remove-btn" data-param="${name}" data-idx="${i}"><i class="fas fa-times"></i></button></div>`
     ).join('');
     return `<div class="multi-image-grid" id="imgGrid_${name}">${thumbsHtml}</div>
       <div class="image-upload-zone" data-param="${name}" data-multi="true">
@@ -429,7 +450,8 @@ function renderImageUpload(name, spec, isMulti) {
     if (existing) {
       return `<div class="image-upload-zone has-image" data-param="${name}">
         <div class="upload-preview">
-          <img src="${existing}" alt="Preview">
+          <img src="${existing}" alt="Preview" onload="paintImgRatio(this)">
+          <span class="img-ratio hidden"></span>
           <button class="remove-btn" data-param="${name}"><i class="fas fa-times"></i></button>
         </div>
       </div>`;
