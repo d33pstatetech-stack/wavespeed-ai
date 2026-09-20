@@ -196,10 +196,14 @@ export default function App() {
             {!loadingSchema && !schema && <p className="text-xs text-gray-600">Select a model to configure parameters.</p>}
             {!loadingSchema && schema && <ParamForm schema={schema} values={params} onChange={setParams} notify={toast} />}
           </Section>
-          <Section icon="fa-palette" title="My HuggingFace LoRAs" defaultOpen={false}
+          <Section icon="fa-palette" title="My HuggingFace LoRAs" step={4} defaultOpen={false}
             summary="HF quick-fill">
             <p className="text-[11px] text-gray-500 mb-1">Quick-fill a LoRA into the current model's LoRA field. Private repos auto-proxy via the Worker.</p>
-            <LoraPicker variant="user" schema={schema} modelId={selectedId} params={params} onParams={mergeParams} notify={toast} />
+            <LoraPicker variant="user" schema={schema} model={selected} modelId={selectedId} params={params} onParams={mergeParams} notify={toast} />
+          </Section>
+          <Section icon="fa-fire" title="NSFW LoRAs" step={5} defaultOpen={false} summary="18+ only">
+            <p className="text-[11px] text-gray-500 mb-1">Only adapters with a WaveSpeed LoRA endpoint. 18+ only.</p>
+            <LoraPicker variant="nsfw" schema={schema} model={selected} modelId={selectedId} params={params} onParams={mergeParams} notify={toast} />
           </Section>
         </div>
 
@@ -279,13 +283,6 @@ export default function App() {
           </Section>
         </div>
       </main>
-
-      <div className="max-w-[1600px] mx-auto px-4 pb-6">
-        <Section icon="fa-fire" title="NSFW LoRAs — WaveSpeed-runnable" defaultOpen={false} summary="18+ only">
-          <p className="text-[11px] text-gray-500 mb-1">Only adapters with a WaveSpeed LoRA endpoint: FLUX.1-dev → flux-1-dev-style-lora-inference (lora_url), Wan 2.1 I2V → wan2.1-lora-i2v (lora_list). 18+ only.</p>
-          <LoraPicker variant="nsfw" schema={schema} modelId={selectedId} params={params} onParams={mergeParams} notify={toast} />
-        </Section>
-      </div>
 
       <div className="fixed bottom-4 right-4 space-y-2 z-50 max-w-[90vw]">
         {toasts.map((t) => (

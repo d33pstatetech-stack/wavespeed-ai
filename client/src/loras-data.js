@@ -281,3 +281,8 @@ export const NSFW_LORAS = [
       note: "20 downloads. Stamped Wan 2.1 I2V 720P. Fills lora_list as {path, scale}. 307 MB."
     }
   ];
+
+// Run-verified LoRA ↔ model pairs (WaveSpeed). Green-light source of truth:
+// only pairs below render green. No LoRA runs completed on WaveSpeed yet —
+// add a row every time a combo completes.
+export const VERIFIED_LORA_RUNS = [];
