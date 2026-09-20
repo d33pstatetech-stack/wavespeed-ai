@@ -3,7 +3,8 @@ main = "src/worker.js"
 compatibility_date = "2025-01-01"
 
 [assets]
-directory = "public"
+# BRANCH-ONLY (feature/wavespeed-react): serve the Vite build. main keeps "public".
+directory = "client/dist"
 
 [[d1_databases]]
 binding = "DB"
