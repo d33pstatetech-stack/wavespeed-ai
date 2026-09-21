@@ -1230,6 +1230,7 @@ async function fetchJsonUpstream(url, env, timeoutMs = 25000) {
   try {
     const headers = { 'User-Agent': LORA_UA, Accept: 'application/json' };
     if (/huggingface\.co/.test(url) && env.HUGGINGFACE_API_KEY) headers.Authorization = `Bearer ${env.HUGGINGFACE_API_KEY}`;
+    if (/civitai\.com/.test(url) && env.CIVITAI_API_KEY) headers.Authorization = `Bearer ${env.CIVITAI_API_KEY}`;
     const res = await fetch(url, { headers, signal: ctrl.signal });
     if ((res.status === 401 || res.status === 403) && headers.Authorization) {
       // Retry anonymously: distinguishes nonexistent (404) from gated/private (still denied).
