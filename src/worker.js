@@ -14,7 +14,7 @@
 
 const WAVESPEED_BASE = 'https://api.wavespeed.ai/api/v3';
 
-const PROTECTED_API_PREFIXES = ['/api/generate', '/api/upload', '/api/predictions', '/api/sync', '/api/enhance', '/api/optimize', '/api/llm-config', '/api/prompts', '/api/wavespeed', '/api/cloud', '/api/history'];
+const PROTECTED_API_PREFIXES = ['/api/generate', '/api/upload', '/api/predictions', '/api/sync', '/api/enhance', '/api/optimize', '/api/llm-config', '/api/prompts', '/api/wavespeed', '/api/cloud', '/api/history', '/api/lora'];
 
 const DEFAULT_LLM_PROVIDERS = [
   { baseUrl: 'https://openrouter.ai/api/v1', model: 'liquid/lfm-2.5-2.6b:free', apiKey: '' },
@@ -618,6 +618,72 @@ async function handleApiRoute(request, env, path, ctx) {
     return jsonResponse({ ok: true, config: redactLLMConfig(toSave) });
   }
 
+  // ─── POST /api/lora/resolve — resolve an HF/CivitAI model-card URL to LoRA file(s) ───
+  if (path === '/api/lora/resolve' && request.method === 'POST') {
+    let body;
+    try { body = await request.json(); } catch { return jsonResponse({ error: 'Invalid JSON' }, 400); }
+    const url = String(body.url || '').trim();
+    if (!url) return jsonResponse({ error: 'url is required' }, 400);
+    try {
+      return jsonResponse(await resolveLoraUrl(url, env));
+    } catch (e) {
+      return jsonResponse({ error: String((e && e.message) || e).slice(0, 300) }, 422);
+    }
+  }
+
+  // ─── GET /api/loras/custom — user-added LoRAs (shared HISTORY table) ───
+  if (path === '/api/loras/custom' && request.method === 'GET') {
+    const hdb = histDB(env);
+    if (!hdb) return jsonResponse({ error: 'history DB not bound' }, 500);
+    await ensureCustomLoras(hdb);
+    const rows = await hdb.prepare('SELECT * FROM custom_loras ORDER BY id DESC').all();
+    return jsonResponse({ loras: (rows.results || []).map(customLoraToEntry) });
+  }
+
+  // ─── POST /api/loras/custom — save a preview-confirmed LoRA ───
+  if (path === '/api/loras/custom' && request.method === 'POST') {
+    const hdb = histDB(env);
+    if (!hdb) return jsonResponse({ error: 'history DB not bound' }, 500);
+    await ensureCustomLoras(hdb);
+    let body;
+    try { body = await request.json(); } catch { return jsonResponse({ error: 'Invalid JSON' }, 400); }
+    const source = String(body.source || '').trim();
+    const repo = String(body.repo || '').trim();
+    const name = String(body.name || repo || '').trim();
+    const file = String(body.file || '').trim();
+    const fileUrl = String(body.file_url || '').trim();
+    if (!['hf', 'civitai'].includes(source)) return jsonResponse({ error: 'source must be hf or civitai' }, 400);
+    if (!repo || !name) return jsonResponse({ error: 'repo and name are required' }, 400);
+    if (!/^https?:\/\//.test(fileUrl)) return jsonResponse({ error: 'file_url must be a full https URL' }, 400);
+    const triggers = Array.isArray(body.triggers) ? body.triggers.map(String).slice(0, 12) : [];
+    const formats = body.formats && typeof body.formats === 'object' ? body.formats : {};
+    try {
+      const r = await hdb.prepare(
+        'INSERT OR IGNORE INTO custom_loras (source, repo, name, file, repo_url, file_url, base_model, pipeline, triggers_json, formats_json, version_note, nsfw, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+      ).bind(
+        source, repo, name.slice(0, 200), file.slice(0, 200), String(body.repo_url || '').slice(0, 500), fileUrl.slice(0, 1000),
+        String(body.base_model || '').slice(0, 200), body.pipeline === 'video-generation' ? 'video-generation' : 'text-to-image',
+        JSON.stringify(triggers), JSON.stringify(formats), String(body.version_note || '').slice(0, 200), body.nsfw ? 1 : 0, 'ui',
+      ).run();
+      const row = await hdb.prepare('SELECT * FROM custom_loras WHERE source = ? AND repo = ? AND file = ?').bind(source, repo, file).first();
+      return jsonResponse({ ok: true, deduplicated: (r.meta.changes || 0) === 0, lora: row ? customLoraToEntry(row) : null });
+    } catch (e) {
+      return jsonResponse({ error: 'DB error: ' + String((e && e.message) || e).slice(0, 200) }, 500);
+    }
+  }
+
+  // ─── DELETE /api/loras/custom/:id ───
+  {
+    const m = path.match(/^\/api\/loras\/custom\/(\d+)$/);
+    if (m && request.method === 'DELETE') {
+      const hdb = histDB(env);
+      if (!hdb) return jsonResponse({ error: 'history DB not bound' }, 500);
+      await ensureCustomLoras(hdb);
+      await hdb.prepare('DELETE FROM custom_loras WHERE id = ?').bind(Number(m[1])).run();
+      return jsonResponse({ ok: true, id: Number(m[1]) });
+    }
+  }
+
   // ─── POST /api/enhance + /api/optimize ─── (streaming, uncensored, fail-fast, single try per provider)
   if ((path === '/api/enhance' || path === '/api/optimize') && request.method === 'POST') {
     let body;
@@ -1153,6 +1219,150 @@ async function syncCatalog(env) {
     synced_at: new Date().toISOString(),
     took_ms: Date.now() - started,
   });
+}
+
+// ─── LoRA URL resolver (Add-from-URL). ───
+const LORA_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
+
+async function fetchJsonUpstream(url, env, timeoutMs = 25000) {
+  const ctrl = new AbortController();
+  const to = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const headers = { 'User-Agent': LORA_UA, Accept: 'application/json' };
+    if (/huggingface\.co/.test(url) && env.HUGGINGFACE_API_KEY) headers.Authorization = `Bearer ${env.HUGGINGFACE_API_KEY}`;
+    const res = await fetch(url, { headers, signal: ctrl.signal });
+    if ((res.status === 401 || res.status === 403) && headers.Authorization) {
+      // Retry anonymously: distinguishes nonexistent (404) from gated/private (still denied).
+      const anon = await fetch(url, { headers: { 'User-Agent': LORA_UA, Accept: 'application/json' }, signal: ctrl.signal });
+      if (anon.status === 404) throw new Error('Not found upstream — check the URL');
+      if (anon.ok) return await anon.json();
+      throw new Error('Upstream denied access (private/gated repo — check visibility or token)');
+    }
+    if (res.status === 401 || res.status === 403) throw new Error('Upstream denied access (private/gated repo — check visibility or token)');
+    if (res.status === 404) throw new Error('Not found upstream — check the URL');
+    if (!res.ok) throw new Error(`Upstream HTTP ${res.status}`);
+    return await res.json();
+  } finally {
+    clearTimeout(to);
+  }
+}
+
+// Coarse CivitAI baseModel → arch family string (feeds the picker's loraFamily).
+function civitaiBaseToFamily(baseModel) {
+  const b = String(baseModel || '');
+  if (/^flux/i.test(b)) return 'black-forest-labs/FLUX.1-dev';
+  if (/^qwen/i.test(b)) return 'Qwen-Image';
+  if (/^wan/i.test(b)) return 'Wan';
+  if (/^hunyuan/i.test(b)) return 'HunyuanVideo';
+  if (/^ltx/i.test(b)) return 'LTX-Video';
+  if (/^sdxl/i.test(b)) return 'stabilityai/stable-diffusion-xl-base-1.0';
+  if (/^pony/i.test(b)) return 'Pony Diffusion';
+  if (/^sd ?1/i.test(b)) return 'stable-diffusion-v1-5';
+  return b || '';
+}
+
+async function resolveHuggingFace(owner, repo, env) {
+  const data = await fetchJsonUpstream(`https://huggingface.co/api/models/${owner}/${repo}`, env);
+  if (data.disabled) throw new Error('Repo is disabled upstream');
+  const sibs = Array.isArray(data.siblings) ? data.siblings.map((s) => s.rfilename).filter(Boolean) : [];
+  const rootSf = sibs.filter((f) => !f.includes('/') && /\.safetensors$/i.test(f) && !/-0+\d+-of-/i.test(f));
+  if (!rootSf.length) throw new Error('No .safetensors weights found in this repo');
+  const ranked = [...rootSf].sort((a, b) => ((/lora/i.test(b) ? 1 : 0) - (/lora/i.test(a) ? 1 : 0)) || a.localeCompare(b));
+  const card = data.cardData || {};
+  const baseModel = card.base_model || (Array.isArray(data.tags) ? (data.tags.find((t) => String(t).startsWith('base_model:')) || '').slice(11) : '') || '';
+  const trig = card.instance_prompt;
+  const triggers = Array.isArray(trig) ? trig.map(String) : trig ? [String(trig)] : [];
+  const tag = String(data.pipeline_tag || '');
+  const pipeline = /video/i.test(tag) ? 'video-generation' : 'text-to-image';
+  const warnings = [];
+  if (data.private) warnings.push('Private repo — resolution used the server HF token; generation hosts fetch the file URL directly.');
+  if (data.gated) warnings.push('Gated repo — generation hosts may be denied unless access was granted.');
+  if (!/lora/i.test((data.tags || []).join(' ')) && !rootSf.some((f) => /lora/i.test(f))) warnings.push('Not stamped as a LoRA upstream — verify the weights before use.');
+  const repoUrl = `https://huggingface.co/${owner}/${repo}`;
+  const candidates = ranked.slice(0, 6).map((file, i) => ({
+    file, file_url: `${repoUrl}/resolve/main/${file}`, recommended: i === 0,
+  }));
+  const pick = candidates[0];
+  return {
+    source: 'hf', repo: `${owner}/${repo}`, name: repo, base_model: baseModel, pipeline, triggers,
+    private: !!data.private, nsfw: false,
+    candidates, file: candidates.length === 1 ? pick.file : null,
+    file_url: candidates.length === 1 ? pick.file_url : null, repo_url: repoUrl,
+    formats: candidates.length === 1 ? { muapi: pick.file_url, replicate: pick.file_url, wavespeed: pick.file_url } : {},
+    warnings,
+  };
+}
+
+async function resolveCivitai(modelId, versionId, env) {
+  const data = await fetchJsonUpstream(`https://civitai.com/api/v1/models/${modelId}`, env);
+  if (data.type && data.type !== 'LORA') throw new Error(`Upstream type is ${data.type}, not a LoRA`);
+  const versions = Array.isArray(data.modelVersions) ? data.modelVersions.filter((v) => v.status === 'Published' || v.status === undefined) : [];
+  if (!versions.length) throw new Error('No published versions found');
+  let ver = versionId ? versions.find((v) => String(v.id) === String(versionId)) : versions[0];
+  if (!ver) throw new Error(`Version ${versionId} not found on this model`);
+  const files = Array.isArray(ver.files) ? ver.files : [];
+  const models = files.filter((f) => f.type === 'Model' && /\.safetensors$/i.test(f.name || ''));
+  if (!models.length) throw new Error('No .safetensors model file on this version');
+  const primary = models.find((f) => f.primary) || models[0];
+  const warnings = [];
+  if (data.nsfw) warnings.push('Flagged NSFW upstream — belongs in the NSFW picker.');
+  const repoUrl = `https://civitai.com/models/${data.id}`;
+  const fileUrl = primary.downloadUrl;
+  return {
+    source: 'civitai', repo: String(data.id), name: data.name || `civitai-${data.id}`,
+    nsfw: !!data.nsfw,
+    base_model: civitaiBaseToFamily(ver.baseModel || (data.baseModels && data.baseModels[0]) || data.baseModel),
+    pipeline: /video/i.test(ver.baseModel || '') ? 'video-generation' : 'text-to-image',
+    triggers: Array.isArray(ver.trainedWords) ? ver.trainedWords.map(String) : [],
+    candidates: [{ file: primary.name, file_url: fileUrl, recommended: true }],
+    file: primary.name, file_url: fileUrl, repo_url: repoUrl,
+    formats: {
+      muapi: `civitai:${data.id}@${ver.id}`,
+      replicate: fileUrl, wavespeed: fileUrl,
+    },
+    version_note: `${ver.name || ''} (version ${ver.id})`.slice(0, 200),
+    warnings,
+  };
+}
+
+async function resolveLoraUrl(url, env) {
+  const u = String(url || '').trim();
+  let m = u.match(/huggingface\.co\/([^/\s?#]+)\/([^/\s?#]+)/i);
+  if (m) return resolveHuggingFace(m[1], m[2].replace(/\/$/, ''), env);
+  m = u.match(/civitai\.com\/models\/(\d+)/i);
+  if (m) {
+    let ver = null;
+    try { ver = new URL(u).searchParams.get('modelVersionId'); } catch { /* ignore */ }
+    return resolveCivitai(m[1], ver, env);
+  }
+  m = u.match(/^civitai:(\d+)(?:@(\d+))?$/i);
+  if (m) return resolveCivitai(m[1], m[2] || null, env);
+  throw new Error('URL must be a huggingface.co/{owner}/{repo} or civitai.com/models/{id} link (civitai:ID[@VERSION] also works)');
+}
+
+// Self-migrating: production D1 can't be touched from here, so handlers ensure
+// the table exists on first use. migrations-history/0002 covers fresh setups.
+async function ensureCustomLoras(hdb) {
+  await hdb.prepare(
+    'CREATE TABLE IF NOT EXISTS custom_loras (id INTEGER PRIMARY KEY AUTOINCREMENT, source TEXT NOT NULL, repo TEXT NOT NULL, name TEXT NOT NULL, file TEXT NOT NULL DEFAULT \'\', repo_url TEXT NOT NULL DEFAULT \'\', file_url TEXT NOT NULL DEFAULT \'\', base_model TEXT NOT NULL DEFAULT \'\', pipeline TEXT NOT NULL DEFAULT \'text-to-image\', triggers_json TEXT NOT NULL DEFAULT \'[]\', formats_json TEXT NOT NULL DEFAULT \'{}\', version_note TEXT NOT NULL DEFAULT \'\', nsfw INTEGER NOT NULL DEFAULT 0, created_by TEXT NOT NULL DEFAULT \'ui\', UNIQUE(source, repo, file))'
+  ).run();
+}
+
+function customLoraToEntry(row) {
+  let triggers = [];
+  let formats = {};
+  try { triggers = JSON.parse(row.triggers_json || '[]'); } catch { /* keep */ }
+  try { formats = JSON.parse(row.formats_json || '{}'); } catch { /* keep */ }
+  return {
+    id: `custom:${row.id}`, customId: row.id, custom: true, nsfw: !!row.nsfw,
+    source: row.source, name: row.name, file: row.file || '',
+    repo_url: row.repo_url || '', file_url: row.file_url || '',
+    base_model: row.base_model || '', pipeline: row.pipeline || 'text-to-image',
+    private: false, instance_prompt: Array.isArray(triggers) && triggers.length ? triggers[0] : '',
+    triggers: Array.isArray(triggers) ? triggers : [],
+    formats, note: row.version_note ? `Custom · ${row.version_note}` : 'Custom added from URL',
+    suggested_target: '',
+  };
 }
 
 function jsonResponse(data, status = 200, extraHeaders = {}) {

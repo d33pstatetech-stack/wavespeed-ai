@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { NSFW_LORAS, USER_LORAS } from '../loras-data';
 import { filterLoras, loraFamily, modelIsVideo } from '../lora-compat';
 import { loraSlotCount } from '../params';
+import AddLoraUrl from './AddLoraUrl';
 
 const FAM_ORDER = { 'FLUX.1': 0, 'Qwen-Image': 1, Krea: 2, 'Wan 2.1': 3, 'Wan 2.2': 4, 'Wan (other)': 5, 'Other / unstamped': 6 };
 
@@ -38,14 +39,20 @@ function findLoraField(schema) {
 }
 
 // LoRA quick picker. variant: 'user' | 'nsfw'.
-// Props: schema, model (record), modelId, params, onParams(mergeObj), notify.
-export default function LoraPicker({ variant, schema, model, modelId, params, onParams, notify }) {
+// Props: schema, model (record), modelId, params, onParams(mergeObj), notify,
+// custom (user-added entries), onAddCustom(entry), onDeleteCustom(id).
+export default function LoraPicker({ variant, schema, model, modelId, params, onParams, notify, custom, onAddCustom, onDeleteCustom }) {
   const [showAll, setShowAll] = useState(false);
+  const customs = useMemo(() => {
+    const all = Array.isArray(custom) ? custom : [];
+    return all.filter((c) => (variant === 'nsfw' ? !!c.nsfw : !c.nsfw));
+  }, [custom, variant]);
   const base = useMemo(
     () => (variant === 'nsfw' ? [...NSFW_LORAS].sort(nsfwSort) : [...USER_LORAS]),
     [variant],
   );
-  const filt = useMemo(() => filterLoras(base, model, modelId), [base, model, modelId]);
+  const pool = useMemo(() => [...customs, ...base], [customs, base]);
+  const filt = useMemo(() => filterLoras(pool, model, modelId), [pool, model, modelId]);
   const loras = showAll ? [...filt.shown, ...filt.hiddenItems] : filt.shown;
   const filtered = !showAll && filt.hidden > 0;
   const badge = variant === 'nsfw' ? `${loras.length}/${base.length} • NSFW` : `${loras.length}/${base.length} • HF`;
@@ -108,9 +115,11 @@ export default function LoraPicker({ variant, schema, model, modelId, params, on
   };
 
   let lastGroup = null;
+  let lastCustom = null;
   return (
     <div>
-      <div className="flex items-center justify-between gap-2">
+      <AddLoraUrl onAdd={onAddCustom} defaultNsfw={variant === 'nsfw'} notify={notify} />
+      <div className="flex items-center justify-between gap-2 mt-2">
         <span className={`text-[10px] text-white px-2 py-0.5 rounded-full ${badgeCls}`}>{badge}</span>
         {modelId && filt.family && (
           <span className="text-[10px] text-gray-500 truncate" title={`Showing LoRAs compatible with ${modelId}`}>
@@ -147,11 +156,13 @@ export default function LoraPicker({ variant, schema, model, modelId, params, on
           const [dotCls, dotTip] = TIER_DOT[tier] || TIER_DOT.likely;
           const g = variant === 'nsfw' ? groupLabel(l) : null;
           const head = g && g !== lastGroup ? ((lastGroup = g), true) : false;
+          const chead = !!l.custom !== lastCustom ? ((lastCustom = !!l.custom), true) : false;
           const trigs = triggers(l);
           const svc = svcFormats(l);
           const pref = l.preferred || 'docs';
           return (
             <div key={l.id}>
+              {chead && l.custom && <div className="text-[11px] font-bold text-violet-300 mt-2 mb-1 px-1">＋ Custom — added from URL</div>}
               {head && <div className="text-[11px] font-bold text-gray-300 mt-2 mb-1 px-1">{g}</div>}
               <div className="relative p-2 rounded-lg bg-gray-800/50 border border-gray-700" title={`${l.name} — ${l.base_model}`}>
                 <span title={dotTip} className={`absolute -top-1 -right-1 w-3 h-3 rounded-full ${dotCls} ring-2 ring-gray-900 cursor-help`}></span>
@@ -185,8 +196,16 @@ export default function LoraPicker({ variant, schema, model, modelId, params, on
                     <div className="text-[10px] text-gray-400 mt-1 line-clamp-2" title={l.note}>{l.note}</div>
                     <div className="text-[10px] text-purple-300 mt-1" title="Recommended target">→ {l.suggested_target}</div>
                   </div>
-                  <span className="text-[10px] text-gray-600 flex-none" title={l.pipeline === 'video-generation' ? 'Video LoRA' : 'Image LoRA'}>
-                    <i className={`fas ${l.pipeline === 'video-generation' ? 'fa-video' : 'fa-image'}`}></i>
+                  <span className="flex flex-col items-end gap-1 flex-none">
+                    <span className="text-[10px] text-gray-600" title={l.pipeline === 'video-generation' ? 'Video LoRA' : 'Image LoRA'}>
+                      <i className={`fas ${l.pipeline === 'video-generation' ? 'fa-video' : 'fa-image'}`}></i>
+                    </span>
+                    {l.custom && (
+                      <button type="button" onClick={() => onDeleteCustom && onDeleteCustom(l.customId, l.name)}
+                        title="Remove this custom LoRA" className="text-[9px] text-gray-500 hover:text-red-400 underline">
+                        Remove
+                      </button>
+                    )}
                   </span>
                 </div>
                 <div className="mt-2 space-y-1.5">
