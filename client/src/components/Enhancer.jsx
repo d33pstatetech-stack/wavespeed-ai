@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { streamEnhance } from '../api';
+import { APP_NAME, judgeEnhancement, logVerdict, streamEnhance } from '../api';
 import { contextPreviewString, getEnhancerContext } from '../enhancer';
 
 // Single streaming enhancer (used at every breakpoint — no desktop/mobile split).
@@ -9,6 +9,7 @@ export default function Enhancer({ model, params, onUse, notify, onEnhancement }
   const [output, setOutput] = useState('');
   const [meta, setMeta] = useState('Select a model, enter a prompt, click Enhance.');
   const [busy, setBusy] = useState(false);
+  const [verdict, setVerdict] = useState(null); // Jev verifier pilot (log-only)
 
   const ctx = getEnhancerContext(model, params, {});
 
@@ -24,6 +25,7 @@ export default function Enhancer({ model, params, onUse, notify, onEnhancement }
     }
     setBusy(true);
     setOutput('');
+    setVerdict(null);
     setMeta('● thinking — streaming tokens…');
     try {
       const r = await streamEnhance({
@@ -36,6 +38,16 @@ export default function Enhancer({ model, params, onUse, notify, onEnhancement }
       });
       setMeta(`via ${r.providerUsed} / ${r.modelUsed} — ${r.text.length} chars`);
       if (r.historyId && onEnhancement) onEnhancement(r.historyId);
+      // Jev verifier pilot: non-blocking intent-preservation judgment (log-only).
+      judgeEnhancement({ rawPrompt: raw, enhanced: r.text, modelId: ctx.model })
+        .then((j) => {
+          const p = j && j.ok ? j.answers?.preserves_intent?.noul : undefined;
+          if (typeof p === 'number') {
+            setVerdict({ p, ms: j.elapsedMs });
+            logVerdict({ app: APP_NAME, model: ctx.model, question: 'preserves_intent', probability: p, elapsed_ms: j.elapsedMs });
+          }
+        })
+        .catch(() => {});
       pushSaved({
         prompt: r.text,
         rawPrompt: raw,
@@ -97,6 +109,12 @@ export default function Enhancer({ model, params, onUse, notify, onEnhancement }
           </button>
         </div>
         <div className="text-[10px] text-gray-600 mt-1">{meta}</div>
+        {verdict && (
+          <div className={`mt-1 text-[11px] font-semibold ${verdict.p >= 0.85 ? 'text-emerald-300' : 'text-amber-300'}`}
+            title={`Jev intent-preservation judgment${verdict.ms != null ? ` in ${verdict.ms}ms` : ''} — log-only pilot`}>
+            {verdict.p >= 0.85 ? `✓ intent ${verdict.p.toFixed(2)}` : `⚠ intent ${verdict.p.toFixed(2)} — review`}
+          </div>
+        )}
       </div>
     </div>
   );

@@ -14,7 +14,7 @@
 
 const WAVESPEED_BASE = 'https://api.wavespeed.ai/api/v3';
 
-const PROTECTED_API_PREFIXES = ['/api/generate', '/api/upload', '/api/predictions', '/api/sync', '/api/enhance', '/api/optimize', '/api/llm-config', '/api/prompts', '/api/wavespeed', '/api/cloud', '/api/history', '/api/lora'];
+const PROTECTED_API_PREFIXES = ['/api/generate', '/api/upload', '/api/predictions', '/api/sync', '/api/enhance', '/api/optimize', '/api/llm-config', '/api/prompts', '/api/wavespeed', '/api/cloud', '/api/history', '/api/lora', '/api/judge'];
 
 const DEFAULT_LLM_PROVIDERS = [
   { baseUrl: 'https://openrouter.ai/api/v1', model: 'liquid/lfm-2.5-2.6b:free', apiKey: '' },
@@ -618,6 +618,50 @@ async function handleApiRoute(request, env, path, ctx) {
     return jsonResponse({ ok: true, config: redactLLMConfig(toSave) });
   }
 
+  // ─── POST /api/judge — Jev structured-judgment proxy (never blocks callers on failure) ───
+  if (path === '/api/judge' && request.method === 'POST') {
+    let body;
+    try { body = await request.json(); } catch { return jsonResponse({ error: 'Invalid JSON' }, 400); }
+    const check = validateJudgeBody(body);
+    if (check) return jsonResponse({ error: check }, 400);
+    if (!env.JEV_API_KEY) return jsonResponse({ ok: false, error: 'JEV_API_KEY not configured' });
+    const timeoutMs = Math.min(Math.max(Number(body.timeoutMs) || 8000, 1000), 30000);
+    const ctrl = new AbortController();
+    const to = setTimeout(() => ctrl.abort(), timeoutMs);
+    try {
+      const res = await fetch('https://api.typesafe.ai/v1/systemone', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${env.JEV_API_KEY}` },
+        body: JSON.stringify({ model: body.model || 'jev-latest', state: body.state, questions: body.questions }),
+        signal: ctrl.signal,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) return jsonResponse({ ok: false, error: data.error || data.message || `Jev HTTP ${res.status}`, upstreamStatus: res.status });
+      return jsonResponse({ ok: true, answers: data.answers || {}, usage: data.usage || null, elapsedMs: data.elapsedMs ?? null, model: body.model || 'jev-latest' });
+    } catch (e) {
+      return jsonResponse({ ok: false, error: 'judge request failed: ' + String((e && e.message) || e).slice(0, 200) });
+    } finally {
+      clearTimeout(to);
+    }
+  }
+
+  // ─── POST /api/judge/log — calibration verdicts (shared table, self-migrating) ───
+  if (path === '/api/judge/log' && request.method === 'POST') {
+    const hdb = histDB(env);
+    if (!hdb) return jsonResponse({ error: 'history DB not bound' }, 500);
+    let body;
+    try { body = await request.json(); } catch { return jsonResponse({ error: 'Invalid JSON' }, 400); }
+    const prob = Number(body.probability);
+    if (!body.app || !body.question || !Number.isFinite(prob)) return jsonResponse({ error: 'app, question, probability required' }, 400);
+    await hdb.prepare(
+      'CREATE TABLE IF NOT EXISTS judge_verdicts (id INTEGER PRIMARY KEY AUTOINCREMENT, app TEXT NOT NULL DEFAULT \'\', model TEXT NOT NULL DEFAULT \'\', question TEXT NOT NULL DEFAULT \'\', probability REAL NOT NULL DEFAULT 0, elapsed_ms INTEGER, created_at TEXT NOT NULL DEFAULT (datetime(\'now\')))'
+    ).run();
+    await hdb.prepare('INSERT INTO judge_verdicts (app, model, question, probability, elapsed_ms) VALUES (?, ?, ?, ?, ?)').bind(
+      String(body.app).slice(0, 40), String(body.model || '').slice(0, 200), String(body.question).slice(0, 80), prob, Number(body.elapsed_ms) || null,
+    ).run();
+    return jsonResponse({ ok: true });
+  }
+
   // ─── POST /api/lora/resolve — resolve an HF/CivitAI model-card URL to LoRA file(s) ───
   if (path === '/api/lora/resolve' && request.method === 'POST') {
     let body;
@@ -1219,6 +1263,25 @@ async function syncCatalog(env) {
     synced_at: new Date().toISOString(),
     took_ms: Date.now() - started,
   });
+}
+
+// Validate a /api/judge body. Returns an error string or null.
+function validateJudgeBody(body) {
+  if (!body || typeof body !== 'object') return 'Invalid JSON body';
+  const s = JSON.stringify(body.state || '');
+  if (!body.state || s.length < 2) return 'state is required';
+  if (s.length > 12000) return 'state too large (12k char cap)';
+  const q = body.questions;
+  if (!q || typeof q !== 'object' || Array.isArray(q)) return 'questions must be an object';
+  const ids = Object.keys(q);
+  if (!ids.length) return 'at least one question is required';
+  if (ids.length > 8) return 'at most 8 questions per call';
+  for (const id of ids) {
+    const qq = q[id] || {};
+    if (!['choice', 'score', 'noul'].includes(qq.type)) return `question ${id}: type must be choice|score|noul`;
+    if (!qq.instructions || typeof qq.instructions !== 'string') return `question ${id}: instructions required`;
+  }
+  return null;
 }
 
 // ─── LoRA URL resolver (Add-from-URL). ───
