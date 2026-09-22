@@ -242,6 +242,12 @@ export default function App() {
               disabled={gen.busy} />
           </Section>
 
+          <Section icon="fa-wand-magic-sparkles" title="AI Prompt Enhancer" defaultOpen={false}>
+            <div id="enhancer">
+              <Enhancer model={selected} params={params} onUse={setPrompt} notify={toast} onEnhancement={setEnhancementId} />
+            </div>
+          </Section>
+
           <button id="genBtn" type="button" onClick={() => { gen.submit({ modelId: selectedId, prompt, params, enhancementId }); setEnhancementId(null); }}
             disabled={!canGenerate} className="generate-btn sticky bottom-3 z-20 shadow-2xl lg:static">
             {gen.busy ? (<span><span className="spinner mr-2"></span>Generating…</span>) : (<span><i className="fas fa-play mr-2"></i>Generate</span>)}
@@ -303,11 +309,6 @@ export default function App() {
             ) : (
               <p className="text-xs text-gray-600">Select a model to see details.</p>
             )}
-          </Section>
-          <Section icon="fa-wand-magic-sparkles" title="AI Prompt Enhancer" defaultOpen={false}>
-            <div id="enhancer">
-              <Enhancer model={selected} params={params} onUse={setPrompt} notify={toast} onEnhancement={setEnhancementId} />
-            </div>
           </Section>
         </div>
       </main>
