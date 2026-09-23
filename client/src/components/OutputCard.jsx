@@ -9,9 +9,13 @@ function isVideoUrl(u) {
 export default function OutputCard({ result, modelId, notify }) {
   const [rating, setRating] = useState(0);
   const [arch, setArch] = useState(null); // { ok, total, firstErr } | { failed:true }
+  const [sel, setSel] = useState(0);
+  const reqId = result?.requestId;
+  useEffect(() => { setSel(0); setRating(0); setArch(null); }, [reqId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!result?.outputs?.length) return null;
-  const url = result.outputs[0];
+  const outputs = result.outputs;
+  const url = outputs[Math.min(sel, outputs.length - 1)];
   const video = isVideoUrl(url);
   const costStr = result.cost?.amount_usd ? `$${Number(result.cost.amount_usd).toFixed(4)}` : 'N/A';
 
@@ -55,6 +59,25 @@ export default function OutputCard({ result, modelId, notify }) {
         <video src={url} controls autoPlay loop className="w-full max-h-[500px] rounded-xl bg-black" />
       ) : (
         <img src={url} alt="Generated" className="w-full max-h-[500px] object-contain rounded-xl bg-black" />
+      )}
+      {outputs.length > 1 && (
+        <div className="flex gap-1.5 mt-2 overflow-x-auto" role="tablist" aria-label="Outputs">
+          {outputs.map((u, i) => {
+            const v = isVideoUrl(u);
+            const on = i === Math.min(sel, outputs.length - 1);
+            return (
+              <button key={i} type="button" onClick={() => setSel(i)} role="tab" aria-selected={on} title={`Output ${i + 1}`}
+                className={`relative flex-none w-16 h-16 rounded-lg overflow-hidden border bg-black ${on ? 'border-violet-500 ring-1 ring-violet-500' : 'border-gray-800'}`}>
+                {v ? (
+                  <span className="w-full h-full flex items-center justify-center"><i className="fas fa-video text-gray-500 text-xs"></i></span>
+                ) : (
+                  <img src={u} alt="" loading="lazy" className="w-full h-full object-cover" />
+                )}
+                <span className="absolute bottom-0 right-0.5 text-[9px] font-mono text-white bg-black/60 px-0.5 rounded">{i + 1}</span>
+              </button>
+            );
+          })}
+        </div>
       )}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-2 text-[11px] text-gray-500">
         <span><i className="fas fa-clock mr-1"></i>{result.elapsed}s</span>

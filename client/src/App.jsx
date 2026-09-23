@@ -76,7 +76,7 @@ export default function App() {
     setHistory((h) => {
       const next = [{
         requestId: r.requestId,
-        url: r.outputs[0],
+        url: r.outputs[0], urls: r.outputs,
         cost: r.cost?.amount_usd,
         elapsed: r.elapsed,
         model: selectedId,
