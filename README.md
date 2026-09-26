@@ -1,4 +1,4 @@
-# WaveSpeed Prompt Generator
+﻿# WaveSpeed Prompt Generator
 
 A schema-driven prompt console for the [WaveSpeed AI](https://wavespeed.ai) catalog — image, video, and audio behind one API key. It is the WaveSpeed sibling of [muapi-prompt-generator](https://github.com/d33pstatetech-stack/muapi-prompt-generator) and shares most of the front end: the same prompt enhancer, LoRA library, run history, and R2 output capture.
 
@@ -215,7 +215,7 @@ usable MIME type.
 
 | Method | Path | Description |
 |---|---|---|
-| GET | `/api/health` | Model count, last sync time, key status *(public)* |
+| GET | `/api/health` | Model count, last sync time, key status |
 | GET | `/api/models` | Catalog listing — `?category=&family=&group_of=&q=&limit=` |
 | GET | `/api/models/:id` | Single model plus parameter schema |
 | GET | `/api/categories` | Category counts |
@@ -243,8 +243,10 @@ usable MIME type.
 | POST | `/api/judge/log` | Record a verdict for calibration |
 
 The gate covers every route that spends a key or can modify state. The read-only
-catalog routes and `/api/health` stay open so the model list can be browsed and
-cached without a session.
+catalog routes and `/api/health` stay open in the Worker so the model list can be
+browsed and cached without a session. An Access application covering the whole
+hostname will still intercept them at the edge; the split only matters if Access
+is scoped to specific paths.
 
 ---
 
