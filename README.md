@@ -359,12 +359,19 @@ model-card URL through `POST /api/lora/resolve`. CivitAI lookups use
 `CIVITAI_API_KEY` when present. Anything added by hand joins a shared library in
 D1, deduplicated on source + repo + file.
 
-`client/src/loras-data.js` ships a small seed list of public community adapters,
-one per family the compatibility filter understands, so the picker is useful on a
-fresh clone. It is a starting point, not a curated endorsement. The seed spans
-FLUX.1, Qwen-Image, Krea, and Wan 2.1, which also keeps the tier dots visible on
-a first run. The legacy preview's copy is regenerated from it with
+`client/src/loras-data.js` holds the picker's seed data as three lists that share
+one shape: `CURATED_LORAS` (public community adapters), `OWN_LORAS` (the
+maintainer's own trained adapters), and `NSFW_LORAS` (uncensored, shown in its
+own picker variant). `USER_LORAS` is the first two combined, which is what the
+default picker renders. All of it is plain data — add, remove, or reorder freely.
+The legacy preview's copy is regenerated from it with
 `node scripts/sync-legacy-loras.mjs public/loras.js`.
+
+WaveSpeed's own servers fetch LoRA weights directly from the Hub, so this Worker
+has no weight-proxy route and needs no `HF_PROXY_REPO_ALLOWLIST`: a URL entered
+in a LoRA field is passed through as-is whether the adapter is public or private.
+`HUGGINGFACE_API_KEY` is used only to read model-card metadata when resolving a
+LoRA URL.
 
 Picking a LoRA the selected model cannot load wastes a generation, so the
 pickers filter by compatibility using a three-tier model in

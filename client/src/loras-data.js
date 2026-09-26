@@ -104,6 +104,101 @@ export const CURATED_LORAS = [
   },
 ];
 
+export const OWN_LORAS = [    {
+      id: "D33pStateTech/aznten-flux.1-dev-replicate",
+      name: "aznten-flux.1-dev-replicate",
+      base_model: "black-forest-labs/FLUX.1-dev",
+      pipeline: "text-to-image",
+      private: false,
+      instance_prompt: "aznten",
+      file: "aznten-flux.1-dev-replicate_Lora.safetensors",
+      repo_url: "https://huggingface.co/D33pStateTech/aznten-flux.1-dev-replicate",
+      file_url: "https://huggingface.co/D33pStateTech/aznten-flux.1-dev-replicate/resolve/main/aznten-flux.1-dev-replicate_Lora.safetensors",
+      suggested_target: "flux-1-dev-style-lora-inference (lora_url) / aznten_replicate (extra_lora)",
+      replicate_model: "d33pstatetech-stack/aznten_replicate",
+      muapi_model: "flux-1-dev-style-lora-inference",
+      note: "FLUX.1-dev LoRA, trigger 'aznten'. Use as lora_url on MuAPI or extra_lora on Replicate AZNTEN (model=dev)."
+    },
+    {
+      id: "D33pStateTech/aznten-flux-schnell-mimicpc",
+      name: "aznten-flux-schnell-mimicpc",
+      base_model: "black-forest-labs/FLUX.1-schnell",
+      pipeline: "text-to-image",
+      private: false,
+      instance_prompt: "aznten",
+      file: "aznten-flux-schnell-mimicpc.safetensors",
+      repo_url: "https://huggingface.co/D33pStateTech/aznten-flux-schnell-mimicpc",
+      file_url: "https://huggingface.co/D33pStateTech/aznten-flux-schnell-mimicpc/resolve/main/aznten-flux-schnell-mimicpc.safetensors",
+      suggested_target: "aznten_replicate (model=schnell, extra_lora)",
+      replicate_model: "d33pstatetech-stack/aznten_replicate",
+      muapi_model: "flux-schnell",
+      note: "FLUX.1-schnell LoRA, trigger 'aznten'. Checkpoint variant aznten-flux-schnell-mimicpc-000004.safetensors also in repo. Use as extra_lora with model=schnell."
+    },
+    {
+      id: "D33pStateTech/aznten-Qwen-Image-2512-Lora-WaveSpeed-AI",
+      name: "aznten-Qwen-Image-2512-Lora-WaveSpeed-AI",
+      base_model: "Qwen/Qwen-Image-2512",
+      pipeline: "text-to-image",
+      private: false,
+      instance_prompt: "aznten",
+      file: "aznten-Qwen-Image-2512-Lora-WaveSpeed-AI.safetensors",
+      repo_url: "https://huggingface.co/D33pStateTech/aznten-Qwen-Image-2512-Lora-WaveSpeed-AI",
+      file_url: "https://huggingface.co/D33pStateTech/aznten-Qwen-Image-2512-Lora-WaveSpeed-AI/resolve/main/aznten-Qwen-Image-2512-Lora-WaveSpeed-AI.safetensors",
+      suggested_target: "qwen-image-text-to-image-2512-lora (loras)",
+      replicate_model: "qwen/qwen-image",
+      muapi_model: "qwen-image-text-to-image-2512-lora",
+      note: "Qwen-Image-2512 LoRA, trigger 'aznten'. For MuAPI use qwen-image-text-to-image-2512-lora ΓåÆ loras: [{\"path\":\"...\",\"scale\":1}]. For Replicate use qwen/qwen-image ΓåÆ lora_weights."
+    },
+    {
+      id: "D33pStateTech/d33pstateten",
+      name: "d33pstateten",
+      base_model: "krea/Krea-2-Raw",
+      pipeline: "text-to-image",
+      private: false,
+      instance_prompt: "aznten",
+      file: "pytorch_lora_weights.safetensors",
+      repo_url: "https://huggingface.co/D33pStateTech/d33pstateten",
+      file_url: "https://huggingface.co/D33pStateTech/d33pstateten/resolve/main/pytorch_lora_weights.safetensors",
+      suggested_target: "krea-v2-turbo-lora (loras) or any Krea-2 via diffusers",
+      replicate_model: "krea/krea-2-large",
+      muapi_model: "krea-v2-turbo-lora",
+      note: "Krea-2-Raw LoRA, trigger aznten. Public repo. For MuAPI use krea-v2-turbo-lora ΓåÆ loras: [{\"path\":\"...\",\"scale\":1}]"
+    },
+    {
+      id: "D33pStateTech/d33pstateLora",
+      name: "d33pstateLora",
+      base_model: "black-forest-labs/FLUX.1-dev",
+      pipeline: "text-to-image",
+      private: false,
+      instance_prompt: "asian ten",
+      file: "flux-asian-ten-v2-000024.safetensors",
+      repo_url: "https://huggingface.co/D33pStateTech/d33pstateLora",
+      file_url: "https://huggingface.co/D33pStateTech/d33pstateLora/resolve/main/flux-asian-ten-v2-000024.safetensors",
+      suggested_target: "flux-dev-lora or flux-1-dev-style-lora-inference (lora_url) / aznten_replicate (extra_lora)",
+      muapi_model: "flux-1-dev-style-lora-inference",
+      note: "FLUX.1-dev LoRA, trigger 'asian ten'. Use as lora_url on MuAPI or extra_lora on Replicate AZNTEN."
+    },
+    {
+      id: "D33pStateTech/asian-ten-wan21-lora",
+      name: "asian-ten-wan21-lora",
+      base_model: "Wan-AI/Wan2.1-T2V-14B",
+      pipeline: "video-generation",
+      private: false,
+      instance_prompt: "",
+      file: "asian_ten_wan21.safetensors",
+      repo_url: "https://huggingface.co/D33pStateTech/asian-ten-wan21-lora",
+      file_url: "https://huggingface.co/D33pStateTech/asian-ten-wan21-lora/resolve/main/asian_ten_wan21.safetensors",
+      suggested_target: "wan2.1-lora-t2v / wan2.1-lora-i2v / wavespeedai/wan-2.1-t2v-480p (lora_weights)",
+      muapi_model: "wan2.1-lora-t2v",
+      note: "Wan2.1 T2V LoRA ΓÇö use as lora_weights on wavespeedai/wan-2.1-t2v-480p or MuAPI wan2.1-lora-*"
+    }
+  ];
+
+// The picker's default variant shows both the public seed set and the owner's
+// own adapters. Kept as a separate export so either list can be swapped out
+// independently.
+export const USER_LORAS = [...CURATED_LORAS, ...OWN_LORAS];
+
 // Uncensored and adult-oriented adapters, kept in a separate variant so the
 // default picker stays clean. These are ordinary public community checkpoints;
 // the only thing separating them is the bucket they appear in. Handle them the
@@ -119,6 +214,7 @@ export const NSFW_LORAS = [
     file: 'sldr_flux_nsfw_v2-studio.safetensors',
     repo_url: 'https://huggingface.co/xey/sldr_flux_nsfw_v2-studio',
     file_url: 'https://huggingface.co/xey/sldr_flux_nsfw_v2-studio/resolve/main/sldr_flux_nsfw_v2-studio.safetensors',
+    replicate_model: 'd33pstatetech-stack/aznten_replicate',
     suggested_target: 'flux-1-dev-style-lora-inference (lora_url)',
     note: '307 likes · 1.1M downloads. Photorealistic-oriented adapter. No documented trigger. 687 MB.',
   },
@@ -131,6 +227,7 @@ export const NSFW_LORAS = [
     file: 'flux_lustly-ai_v1.safetensors',
     repo_url: 'https://huggingface.co/lustlyai/Flux_Lustly.ai_Uncensored_nsfw_v1',
     file_url: 'https://huggingface.co/lustlyai/Flux_Lustly.ai_Uncensored_nsfw_v1/resolve/main/flux_lustly-ai_v1.safetensors',
+    replicate_model: 'd33pstatetech-stack/aznten_replicate',
     suggested_target: 'flux-1-dev-style-lora-inference (lora_url)',
     note: '275 likes · 155.5K downloads. General uncensored adapter. No trigger word. 344 MB.',
   },
@@ -144,6 +241,7 @@ export const NSFW_LORAS = [
     file: 'NSFW_master.safetensors',
     repo_url: 'https://huggingface.co/lexa862/NSFWmodel',
     file_url: 'https://huggingface.co/lexa862/NSFWmodel/resolve/main/NSFW_master.safetensors',
+    replicate_model: 'd33pstatetech-stack/aznten_replicate',
     suggested_target: 'flux-1-dev-style-lora-inference (lora_url)',
     note: "78 likes · 459.7K downloads. Trigger 'Nude'. 172 MB, permissive unlicense.",
   },
@@ -158,6 +256,7 @@ export const NSFW_LORAS = [
     file: 'NSFW_master_Flux.safetensors',
     repo_url: 'https://huggingface.co/Keltezaa/NSFW_MASTER_FLUX',
     file_url: 'https://huggingface.co/Keltezaa/NSFW_MASTER_FLUX/resolve/main/NSFW_master_Flux.safetensors',
+    replicate_model: 'd33pstatetech-stack/aznten_replicate',
     suggested_target: 'flux-1-dev-style-lora-inference (lora_url)',
     note: "68 likes · 30.3K downloads. Triggers 'NSFW' or 'Nude'. 172 MB. MIT.",
   },
@@ -170,6 +269,7 @@ export const NSFW_LORAS = [
     file: 'lora.safetensors',
     repo_url: 'https://huggingface.co/imagepipeline/flux_uncensored_nsfw_v2',
     file_url: 'https://huggingface.co/imagepipeline/flux_uncensored_nsfw_v2/resolve/main/lora.safetensors',
+    replicate_model: 'd33pstatetech-stack/aznten_replicate',
     suggested_target: 'flux-1-dev-style-lora-inference (lora_url)',
     note: '34 likes · 33.1K downloads. Tagged ultra-realistic. No documented trigger. 687 MB.',
   },
@@ -275,15 +375,13 @@ export const NSFW_LORAS = [
   },
 ];
 
-// Backwards-compatible alias: the curated list was previously named USER_LORAS.
-// The alias keeps existing imports working while the name reflects that these
-// are public community seeds rather than one person's private collection.
-export const USER_LORAS = CURATED_LORAS;
-
 // Run-verified LoRA ↔ model pairs. This is the single source of truth for the
 // green "verified" tier in lora-compat.js: a pair appears green only if listed
 // here. Add a row each time a combination completes a real generation.
 //
 //   { lora: '<hf owner/repo>', model: '<provider model id>', job: '<request id>', when: 'YYYY-MM-DD' }
 //
-export const VERIFIED_LORA_RUNS = [];
+export const VERIFIED_LORA_RUNS = [
+  { lora: "D33pStateTech/d33pstateten", model: "krea-v2-turbo-lora", job: "840e36f8-d765-4966-8e9b-6f8dc4808053", when: "2026-09-20" },
+  { lora: "D33pStateTech/aznten-Qwen-Image-2512-Lora-WaveSpeed-AI", model: "qwen-image-text-to-image-2512-lora", job: "4984353a-0796-4af1-84f9-00451b6f086c", when: "2026-09-19" },
+];

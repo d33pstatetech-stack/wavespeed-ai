@@ -31,7 +31,9 @@ WAVESPEED_BASE_URL = "https://api.wavespeed.ai/api/v3"
 # environment-specific: substitute your own before deploying a fork.
 R2_ACCOUNT_ID = "3e37b0a010de20bc7fc5b6c9d0dcb285"
 R2_BUCKET = "genai-assets"
-# Canonical origin to advertise when rewriting HuggingFace URLs to the private
-# LoRA proxy, and when calling LLM providers that expect a referrer.
-# Leave empty to use the incoming request origin.
-HF_PROXY_BASE_URL = ""
+
+# No HF_PROXY_REPO_ALLOWLIST here on purpose: this Worker has no /api/hf/file
+# route. LoRA weights are fetched by WaveSpeed's own servers straight from the
+# Hub, so public and private adapters alike are referenced by URL and nothing
+# needs proxying through this account's HUGGINGFACE_API_KEY. The key is used
+# only to read model-card metadata when resolving a LoRA URL.
