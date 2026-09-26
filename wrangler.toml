@@ -3,17 +3,20 @@ main = "src/worker.js"
 compatibility_date = "2025-01-01"
 
 [assets]
-# BRANCH-ONLY (feature/wavespeed-react): serve the Vite build. main keeps "public".
+# Built React client (client/dist), served from the edge cache.
+# Rebuild with `npm --prefix client run build` before deploying.
 directory = "client/dist"
 
 [[d1_databases]]
 binding = "DB"
 database_name = "wavespeed-models"
+# Environment-specific. Replace with the id from `wrangler d1 create` on a fork.
 database_id = "eef5c721-6172-4e19-9f72-f101cdd7da52"
 
 [[d1_databases]]
 binding = "HISTORY"
 database_name = "genai-history"
+# Environment-specific. Replace with the id from `wrangler d1 create` on a fork.
 database_id = "6a271502-ea90-411b-935c-50a16d5d5300"
 
 [[r2_buckets]]
@@ -24,5 +27,11 @@ bucket_name = "genai-assets"
 WAVESPEED_BASE_URL = "https://api.wavespeed.ai/api/v3"
 # R2 presigned URLs for cloud file picker (worker fetches nothing; provider pulls directly).
 # Secrets R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY via `wrangler secret put`.
+# R2_ACCOUNT_ID is an account identifier, not a credential, but it is still
+# environment-specific: substitute your own before deploying a fork.
 R2_ACCOUNT_ID = "3e37b0a010de20bc7fc5b6c9d0dcb285"
 R2_BUCKET = "genai-assets"
+# Canonical origin to advertise when rewriting HuggingFace URLs to the private
+# LoRA proxy, and when calling LLM providers that expect a referrer.
+# Leave empty to use the incoming request origin.
+HF_PROXY_BASE_URL = ""

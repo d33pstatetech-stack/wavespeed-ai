@@ -775,7 +775,7 @@ async function handleApiRoute(request, env, path, ctx) {
           headers: {
             'Content-Type': 'application/json',
             Authorization: `Bearer ${apiKey}`,
-            'HTTP-Referer': 'https://wavespeed-prompt-generator.d33pstatetech.workers.dev',
+            'HTTP-Referer': env.HF_PROXY_BASE_URL || new URL(request.url).origin,
             'X-Title': 'WaveSpeed Prompt Generator',
           },
           body: JSON.stringify({
