@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { NSFW_LORAS, USER_LORAS } from '../loras-data';
+import { AZNTEN_LORAS, MISC_LORAS, NSFW_LORAS, isAzntenLora } from '../loras-data';
 import { filterLoras, loraFamily, modelIsVideo } from '../lora-compat';
 import { loraSlotCount } from '../params';
 import AddLoraUrl from './AddLoraUrl';
@@ -38,25 +38,27 @@ function findLoraField(schema) {
   return null;
 }
 
-// LoRA quick picker. variant: 'user' | 'nsfw'.
+// LoRA quick picker. variant: 'aznten' | 'misc' | 'nsfw' ('user' = legacy misc alias).
 // Props: schema, model (record), modelId, params, onParams(mergeObj), notify,
 // custom (user-added entries), onAddCustom(entry), onDeleteCustom(id).
 export default function LoraPicker({ variant, schema, model, modelId, params, onParams, notify, custom, onAddCustom, onDeleteCustom }) {
   const [showAll, setShowAll] = useState(false);
   const customs = useMemo(() => {
     const all = Array.isArray(custom) ? custom : [];
-    return all.filter((c) => (variant === 'nsfw' ? !!c.nsfw : !c.nsfw));
+    if (variant === 'nsfw') return all.filter((c) => !!c.nsfw);
+    const clean = all.filter((c) => !c.nsfw);
+    return variant === 'aznten' ? clean.filter(isAzntenLora) : clean.filter((c) => !isAzntenLora(c));
   }, [custom, variant]);
   const base = useMemo(
-    () => (variant === 'nsfw' ? [...NSFW_LORAS].sort(nsfwSort) : [...USER_LORAS]),
+    () => (variant === 'nsfw' ? [...NSFW_LORAS].sort(nsfwSort) : variant === 'aznten' ? [...AZNTEN_LORAS] : [...MISC_LORAS]),
     [variant],
   );
   const pool = useMemo(() => [...customs, ...base], [customs, base]);
   const filt = useMemo(() => filterLoras(pool, model, modelId), [pool, model, modelId]);
   const loras = showAll ? [...filt.shown, ...filt.hiddenItems] : filt.shown;
   const filtered = !showAll && filt.hidden > 0;
-  const badge = variant === 'nsfw' ? `${loras.length}/${base.length} • NSFW` : `${loras.length}/${base.length} • HF`;
-  const badgeCls = variant === 'nsfw' ? 'bg-red-700' : 'bg-purple-600';
+  const badge = variant === 'nsfw' ? `${loras.length}/${base.length} • NSFW` : variant === 'aznten' ? `${loras.length}/${base.length} • Aznten` : `${loras.length}/${base.length} • Misc`;
+  const badgeCls = variant === 'nsfw' ? 'bg-red-700' : variant === 'aznten' ? 'bg-fuchsia-600' : 'bg-purple-600';
   const loraField = findLoraField(schema);
 
   const TIER_DOT = {

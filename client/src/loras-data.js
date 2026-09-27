@@ -199,6 +199,15 @@ export const OWN_LORAS = [    {
 // independently.
 export const USER_LORAS = [...CURATED_LORAS, ...OWN_LORAS];
 
+// Aznten vs Misc split. Name-pattern only, deliberately source-agnostic: the
+// owner's custom-trained adapters match aznten / asian-ten / d33pstate
+// variants wherever they are hosted (Hugging Face today, anywhere tomorrow).
+// Everything else that is not NSFW is Misc, regardless of source.
+const AZNTEN_RE = /aznten|asian[- ]ten|d33pstate/i;
+export const isAzntenLora = (e = {}) => AZNTEN_RE.test(`${e.name || ''} ${e.id || ''}`);
+export const AZNTEN_LORAS = USER_LORAS.filter(isAzntenLora);
+export const MISC_LORAS = USER_LORAS.filter((e) => !isAzntenLora(e));
+
 // Uncensored and adult-oriented adapters, kept in a separate variant so the
 // default picker stays clean. These are ordinary public community checkpoints;
 // the only thing separating them is the bucket they appear in. Handle them the

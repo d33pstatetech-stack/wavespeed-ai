@@ -224,12 +224,17 @@ export default function App() {
             {!loadingSchema && !schema && <p className="text-xs text-gray-600">Select a model to configure parameters.</p>}
             {!loadingSchema && schema && <ParamForm schema={schema} values={params} onChange={setParams} notify={toast} />}
           </Section>
-          <Section icon="fa-palette" title="My HuggingFace LoRAs" step={4} defaultOpen={false}
-            summary="HF quick-fill">
-            <p className="text-[11px] text-gray-500 mb-1">Quick-fill a LoRA into the current model's LoRA field. Private repos auto-proxy via the Worker.</p>
-            <LoraPicker variant="user" schema={schema} model={selected} modelId={selectedId} params={params} onParams={mergeParams} notify={toast} custom={customLoras} onAddCustom={handleAddCustom} onDeleteCustom={handleDeleteCustom} />
+          <Section icon="fa-crown" title="Aznten LoRAs" step={4} defaultOpen={false}
+            summary="my custom trained">
+            <p className="text-[11px] text-gray-500 mb-1">My own custom-trained adapters (aznten / asian-ten / d33pstate names), wherever hosted. Quick-fill into the current model's LoRA field.</p>
+            <LoraPicker variant="aznten" schema={schema} model={selected} modelId={selectedId} params={params} onParams={mergeParams} notify={toast} custom={customLoras} onAddCustom={handleAddCustom} onDeleteCustom={handleDeleteCustom} />
           </Section>
-          <Section icon="fa-fire" title="NSFW LoRAs" step={5} defaultOpen={false} summary="18+ only">
+          <Section icon="fa-palette" title="Misc LoRAs" step={5} defaultOpen={false}
+            summary="community quick-fill">
+            <p className="text-[11px] text-gray-500 mb-1">Community adapters from any source (HuggingFace, CivitAI, …) — everything not mine and not NSFW. Private repos auto-proxy via the Worker.</p>
+            <LoraPicker variant="misc" schema={schema} model={selected} modelId={selectedId} params={params} onParams={mergeParams} notify={toast} custom={customLoras} onAddCustom={handleAddCustom} onDeleteCustom={handleDeleteCustom} />
+          </Section>
+          <Section icon="fa-fire" title="NSFW LoRAs" step={6} defaultOpen={false} summary="18+ only">
             <p className="text-[11px] text-gray-500 mb-1">Only adapters with a WaveSpeed LoRA endpoint. 18+ only.</p>
             <LoraPicker variant="nsfw" schema={schema} model={selected} modelId={selectedId} params={params} onParams={mergeParams} notify={toast} custom={customLoras} onAddCustom={handleAddCustom} onDeleteCustom={handleDeleteCustom} />
           </Section>
