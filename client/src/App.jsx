@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { deleteCustomLora, fetchCustomLoras, fetchHealth, fetchModel, fetchModels, saveCustomLora, syncCatalog } from './api';
+import { AZNTEN_LORAS, MISC_LORAS, NSFW_LORAS } from './loras-data';
 import Enhancer from './components/Enhancer';
 import HistoryGrid from './components/HistoryGrid';
 import LibraryModal from './components/LibraryModal';
@@ -45,6 +46,31 @@ export default function App() {
   const [library, setLibrary] = useState(null); // null | 'templates' | 'saved'
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [customLoras, setCustomLoras] = useState([]);
+  // LoRA-first selection: pinned LoRA ids filter the model list to compatibles.
+  const [focusLoraIds, setFocusLoraIds] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem('wavespeed_focus_loras') || '[]');
+    } catch {
+      return [];
+    }
+  });
+
+  const toggleFocusLora = useCallback((id) => {
+    setFocusLoraIds((ids) => {
+      const next = ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id];
+      try {
+        localStorage.setItem('wavespeed_focus_loras', JSON.stringify(next));
+      } catch {
+        /* storage full/blocked */
+      }
+      return next;
+    });
+  }, []);
+
+  const focusLoras = useMemo(() => {
+    const pool = [...customLoras, ...AZNTEN_LORAS, ...MISC_LORAS, ...NSFW_LORAS];
+    return focusLoraIds.map((id) => pool.find((l) => l.id === id || l.customId === id)).filter(Boolean);
+  }, [focusLoraIds, customLoras]);
 
   const loadCustomLoras = useCallback(async () => {
     try {
@@ -216,7 +242,7 @@ export default function App() {
       <main className="max-w-[1600px] mx-auto px-4 py-4 grid grid-cols-1 lg:grid-cols-[340px_1fr] xl:grid-cols-[340px_1fr_360px] gap-4">
         <div className="space-y-4">
           <Section icon="fa-brain" title="Model" step={1} summary={selectedId} defaultOpen={!selectedId}>
-            <ModelPicker models={models} value={selectedId} onSelect={handleSelect} />
+            <ModelPicker models={models} value={selectedId} onSelect={handleSelect} focusLoras={focusLoras} onClearFocus={() => setFocusLoraIds([])} />
             {loadingSchema && <p className="text-xs text-gray-500 mt-2">Loading parameters…</p>}
           </Section>
           <Section icon="fa-sliders-h" title="Parameters" step={3} defaultOpen={!!selectedId} summary={selectedId && !schema ? 'loading…' : undefined}>
@@ -226,17 +252,17 @@ export default function App() {
           </Section>
           <Section icon="fa-crown" title="Aznten LoRAs" step={4} defaultOpen={false}
             summary="my custom trained">
-            <p className="text-[11px] text-gray-500 mb-1">My own custom-trained adapters (aznten / asian-ten / d33pstate names), wherever hosted. Quick-fill into the current model's LoRA field.</p>
-            <LoraPicker variant="aznten" schema={schema} model={selected} modelId={selectedId} params={params} onParams={mergeParams} notify={toast} custom={customLoras} onAddCustom={handleAddCustom} onDeleteCustom={handleDeleteCustom} />
+            <p className="text-[11px] text-gray-500 mb-1">My own custom-trained adapters (aznten / asian-ten / d33pstate names), wherever hosted. Quick-fill into the current model's LoRA field. Pin one (📌) to filter the model list to its compatibles.</p>
+            <LoraPicker variant="aznten" schema={schema} model={selected} modelId={selectedId} params={params} onParams={mergeParams} notify={toast} custom={customLoras} onAddCustom={handleAddCustom} onDeleteCustom={handleDeleteCustom} focusIds={focusLoraIds} onToggleFocus={toggleFocusLora} />
           </Section>
           <Section icon="fa-palette" title="Misc LoRAs" step={5} defaultOpen={false}
             summary="community quick-fill">
-            <p className="text-[11px] text-gray-500 mb-1">Community adapters from any source (HuggingFace, CivitAI, …) — everything not mine and not NSFW. Private repos auto-proxy via the Worker.</p>
-            <LoraPicker variant="misc" schema={schema} model={selected} modelId={selectedId} params={params} onParams={mergeParams} notify={toast} custom={customLoras} onAddCustom={handleAddCustom} onDeleteCustom={handleDeleteCustom} />
+            <p className="text-[11px] text-gray-500 mb-1">Community adapters from any source (HuggingFace, CivitAI, …) — everything not mine and not NSFW. Private repos auto-proxy via the Worker. Pin one (📌) to filter the model list to its compatibles.</p>
+            <LoraPicker variant="misc" schema={schema} model={selected} modelId={selectedId} params={params} onParams={mergeParams} notify={toast} custom={customLoras} onAddCustom={handleAddCustom} onDeleteCustom={handleDeleteCustom} focusIds={focusLoraIds} onToggleFocus={toggleFocusLora} />
           </Section>
           <Section icon="fa-fire" title="NSFW LoRAs" step={6} defaultOpen={false} summary="18+ only">
             <p className="text-[11px] text-gray-500 mb-1">Only adapters with a WaveSpeed LoRA endpoint. 18+ only.</p>
-            <LoraPicker variant="nsfw" schema={schema} model={selected} modelId={selectedId} params={params} onParams={mergeParams} notify={toast} custom={customLoras} onAddCustom={handleAddCustom} onDeleteCustom={handleDeleteCustom} />
+            <LoraPicker variant="nsfw" schema={schema} model={selected} modelId={selectedId} params={params} onParams={mergeParams} notify={toast} custom={customLoras} onAddCustom={handleAddCustom} onDeleteCustom={handleDeleteCustom} focusIds={focusLoraIds} onToggleFocus={toggleFocusLora} />
           </Section>
         </div>
 

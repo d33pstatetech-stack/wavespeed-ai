@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { filterModels } from '../lora-compat';
 
 const GROUPS = [
   { id: 'image', icon: 'fa-image', label: 'Image' },
@@ -9,11 +10,20 @@ const GROUPS = [
   { id: 'all', icon: 'fa-th', label: 'All' },
 ];
 
-// Searchable model picker with category tabs. Props: models, value (id), onSelect(id).
-export default function ModelPicker({ models, value, onSelect }) {
+const TIER_DOT = {
+  verified: ['bg-emerald-500', 'Verified — this model completed a run with the pinned LoRA'],
+  likely: ['bg-amber-400', 'Likely compatible with the pinned LoRA'],
+  no: ['bg-red-500', 'Incompatible with the pinned LoRA (visible via Show all)'],
+};
+
+// Searchable model picker with category tabs. Props: models, value (id),
+// onSelect(id), focusLoras (pinned LoRA entries filter the list to
+// compatibles), onClearFocus().
+export default function ModelPicker({ models, value, onSelect, focusLoras, onClearFocus }) {
   const [group, setGroup] = useState('image');
   const [query, setQuery] = useState('');
   const [open, setOpen] = useState(false);
+  const [showAllModels, setShowAllModels] = useState(false);
   const wrapRef = useRef(null);
 
   useEffect(() => {
@@ -24,19 +34,29 @@ export default function ModelPicker({ models, value, onSelect }) {
     return () => document.removeEventListener('pointerdown', close);
   }, []);
 
+  const focusing = Array.isArray(focusLoras) && focusLoras.length > 0;
+  const mfilt = useMemo(() => filterModels(models, focusLoras), [models, focusLoras]);
+  const tierOf = useMemo(() => {
+    const m = new Map();
+    for (const s of mfilt.shown) m.set(s.model.id, s.tier);
+    for (const h of mfilt.hiddenItems) m.set(h.model.id, 'no');
+    return m;
+  }, [mfilt]);
+
   const filtered = useMemo(() => {
     const base = group === 'all' ? models : models.filter((m) => m.group_of === group);
     const q = query.trim().toLowerCase();
     const list = q ? base.filter((m) => (m.id || '').toLowerCase().includes(q) || (m.name || '').toLowerCase().includes(q)) : base;
+    const compat = focusing && !showAllModels ? list.filter((m) => (tierOf.get(m.id) || 'likely') !== 'no') : list;
     const byCat = {};
-    for (const m of list) {
+    for (const m of compat) {
       const cat = m.category || 'Other';
       (byCat[cat] = byCat[cat] || []).push(m);
     }
     return Object.entries(byCat)
       .sort((a, b) => b[1].length - a[1].length)
       .map(([cat, ms]) => [cat, [...ms].sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id))]);
-  }, [models, group, query]);
+  }, [models, group, query, focusing, showAllModels, tierOf]);
 
   const count = useMemo(
     () => filtered.reduce((n, [, ms]) => n + ms.length, 0),
@@ -47,6 +67,33 @@ export default function ModelPicker({ models, value, onSelect }) {
 
   return (
     <div>
+      {focusing && (
+        <div className="mb-2 p-2 rounded-lg bg-fuchsia-950/40 border border-fuchsia-800">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[10px] text-fuchsia-200 truncate" title={focusLoras.map((l) => l.name || l.id).join(', ')}>
+              <i className="fas fa-thumbtack mr-1"></i>
+              {mfilt.shown.length}/{models.length} models · {focusLoras.map((l) => l.name || l.id).join(' + ')}
+            </span>
+            {onClearFocus && (
+              <button type="button" onClick={() => { onClearFocus(); setShowAllModels(false); }}
+                className="text-[10px] text-fuchsia-300 hover:text-white underline flex-none">
+                Clear
+              </button>
+            )}
+          </div>
+          <p className="mt-1 text-[9px] text-fuchsia-300/70">
+            <span className="inline-block w-2 h-2 rounded-full bg-emerald-500 mr-1 align-middle"></span>verified
+            <span className="inline-block w-2 h-2 rounded-full bg-amber-400 ml-2 mr-1 align-middle"></span>likely
+            {showAllModels && <><span className="inline-block w-2 h-2 rounded-full bg-red-500 ml-2 mr-1 align-middle"></span>incompatible</>}
+          </p>
+          {mfilt.hidden > 0 && (
+            <label className="mt-1 flex items-center gap-1.5 text-[10px] text-fuchsia-200/80 cursor-pointer">
+              <input type="checkbox" checked={showAllModels} onChange={(e) => setShowAllModels(e.target.checked)} className="accent-fuchsia-500" />
+              {showAllModels ? 'Showing all — uncheck to re-apply filter' : `Show all ${models.length} (${mfilt.hidden} hidden by LoRA filter)`}
+            </label>
+          )}
+        </div>
+      )}
       <div className="flex gap-1.5 mb-2.5 overflow-x-auto pb-1 -mx-0.5 px-0.5">
         {GROUPS.map((g) => (
           <button
@@ -94,6 +141,11 @@ export default function ModelPicker({ models, value, onSelect }) {
                       m.id === value ? 'text-violet-300 bg-violet-950/40' : 'text-gray-300'
                     }`}
                   >
+                    {focusing && (() => {
+                      const tier = tierOf.get(m.id) || 'likely';
+                      const [dotCls, dotTip] = TIER_DOT[tier] || TIER_DOT.likely;
+                      return <span title={dotTip} className={`w-2 h-2 rounded-full flex-none ${dotCls}`}></span>;
+                    })()}
                     <span className="truncate flex-1">{m.id}</span>
                     <span className="flex-none text-[10px] font-mono text-gray-500">
                       {m.cost > 0 ? `$${m.cost}` : 'Free'}{m.dynamic_pricing ? '*' : ''}

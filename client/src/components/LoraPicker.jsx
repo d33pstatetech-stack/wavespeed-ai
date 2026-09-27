@@ -41,7 +41,7 @@ function findLoraField(schema) {
 // LoRA quick picker. variant: 'aznten' | 'misc' | 'nsfw' ('user' = legacy misc alias).
 // Props: schema, model (record), modelId, params, onParams(mergeObj), notify,
 // custom (user-added entries), onAddCustom(entry), onDeleteCustom(id).
-export default function LoraPicker({ variant, schema, model, modelId, params, onParams, notify, custom, onAddCustom, onDeleteCustom }) {
+export default function LoraPicker({ variant, schema, model, modelId, params, onParams, notify, custom, onAddCustom, onDeleteCustom, focusIds, onToggleFocus }) {
   const [showAll, setShowAll] = useState(false);
   const customs = useMemo(() => {
     const all = Array.isArray(custom) ? custom : [];
@@ -162,6 +162,7 @@ export default function LoraPicker({ variant, schema, model, modelId, params, on
           const trigs = triggers(l);
           const svc = svcFormats(l);
           const pref = l.preferred || 'docs';
+          const pinned = Array.isArray(focusIds) && focusIds.includes(l.id);
           return (
             <div key={l.id}>
               {chead && l.custom && <div className="text-[11px] font-bold text-violet-300 mt-2 mb-1 px-1">＋ Custom — added from URL</div>}
@@ -199,6 +200,14 @@ export default function LoraPicker({ variant, schema, model, modelId, params, on
                     <div className="text-[10px] text-purple-300 mt-1" title="Recommended target">→ {l.suggested_target}</div>
                   </div>
                   <span className="flex flex-col items-end gap-1 flex-none">
+                    {onToggleFocus && (
+                      <button type="button" onClick={() => onToggleFocus(l.id)}
+                        title={pinned ? 'Pinned — click to unpin and show all models again' : 'Pin — filter the model list to this LoRA’s compatibles'}
+                        aria-pressed={pinned} aria-label={pinned ? 'Unpin LoRA model filter' : 'Pin LoRA to filter models'}
+                        className={`w-6 h-6 rounded border flex-none ${pinned ? 'bg-fuchsia-900/50 border-fuchsia-600' : 'bg-gray-900 border-gray-700'}`}>
+                        <i className={`fas fa-thumbtack text-[9px] ${pinned ? 'text-fuchsia-300' : 'text-gray-500'}`}></i>
+                      </button>
+                    )}
                     <span className="text-[10px] text-gray-600" title={l.pipeline === 'video-generation' ? 'Video LoRA' : 'Image LoRA'}>
                       <i className={`fas ${l.pipeline === 'video-generation' ? 'fa-video' : 'fa-image'}`}></i>
                     </span>

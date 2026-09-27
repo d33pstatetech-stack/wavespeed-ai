@@ -77,6 +77,42 @@ export function compatibility(lora, model, modelId) {
   return 'likely';
 }
 
+// Reverse direction: tier of a MODEL against one LoRA, for LoRA-first
+// selection (pin a LoRA → the model list shows its compatibles). Ambiguity
+// errs toward showing: an unknown model family can never hide a model — only
+// a definite mismatch (known family clash, known pipeline clash, major
+// version gap) filters one out.
+export function modelTierForLora(lora, model, modelId) {
+  const t = compatibility(lora, model, modelId);
+  if (t !== 'no') return t;
+  if (!modelFamily(model)) return 'likely';
+  return 'no';
+}
+
+// Best tier of each model across several focus LoRAs. Empty focus =
+// unfiltered (every model 'likely', preserving current behavior).
+export function filterModels(models, focusLoras) {
+  const src = Array.isArray(models) ? models : [];
+  const focus = Array.isArray(focusLoras) ? focusLoras.filter(Boolean) : [];
+  if (!focus.length) {
+    return { shown: src.map((model) => ({ model, tier: 'likely' })), hidden: 0, hiddenItems: [] };
+  }
+  const shown = [];
+  const hiddenItems = [];
+  for (const model of src) {
+    let best = 'no';
+    for (const lora of focus) {
+      const t = modelTierForLora(lora, model, model.id);
+      if (t === 'verified') { best = 'verified'; break; }
+      if (t === 'likely') best = 'likely';
+    }
+    (best === 'no' ? hiddenItems : shown).push({ model, tier: best });
+  }
+  // Verified first, then likely — stable within tiers.
+  shown.sort((a, b) => (a.tier === b.tier ? 0 : a.tier === 'verified' ? -1 : 1));
+  return { shown, hidden: hiddenItems.length, hiddenItems };
+}
+
 // Same family, or Wan cross-minor drift (2.1 LoRA on 2.2 and vice versa).
 // Major gaps (2.x vs 3.x) stay incompatible.
 function familyOk(lora, fam, modelStr) {
