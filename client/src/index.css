@@ -131,3 +131,33 @@ body {
     transform: rotate(360deg);
   }
 }
+
+/* Tooltip bulleted lists: hanging indent so wrapped lines tuck under the text. */
+.tip-list {
+  list-style: disc outside;
+  margin: 0;
+  padding-left: 1.1rem;
+  display: grid;
+  gap: 0.3rem;
+}
+
+.tip-list li {
+  padding-left: 0.15rem;
+}
+
+/* Desktop readability: scale rem-based type/spacing up a notch and enlarge the
+   px-based microcopy that Tailwind's rem scale can't reach. */
+@media (min-width: 1024px) {
+  html {
+    font-size: 17px;
+  }
+  .text-\[9px\] {
+    font-size: 10px;
+  }
+  .text-\[10px\] {
+    font-size: 11.5px;
+  }
+  .text-\[11px\] {
+    font-size: 13px;
+  }
+}
