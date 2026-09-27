@@ -133,6 +133,10 @@ body {
 }
 
 /* Tooltip bulleted lists: hanging indent so wrapped lines tuck under the text. */
+.tip-intro {
+  margin: 0 0 0.35rem;
+}
+
 .tip-list {
   list-style: disc outside;
   margin: 0;

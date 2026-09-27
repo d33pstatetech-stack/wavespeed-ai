@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { autoBullets } from '../tip-format';
 
 // Tooltip replacing always-visible hint paragraphs.
 // <Tip text="..."> renders an ⓘ that shows text on hover/focus/tap.
@@ -44,6 +45,9 @@ export default function Tip({ text, children }) {
 
   if (!text) return children ?? null;
   const parts = String(text).split('\n').map((s) => s.trim()).filter(Boolean);
+  // Single-string provider descriptions ("Load LoRA weights. Supports …")
+  // auto-format into an intro line plus bullets.
+  const auto = parts.length > 1 ? null : autoBullets(text);
   return (
     <span ref={ref} className="relative inline-flex align-middle">
       <button
@@ -68,6 +72,13 @@ export default function Tip({ text, children }) {
             <ul className="tip-list">
               {parts.map((p, i) => <li key={i}>{p}</li>)}
             </ul>
+          ) : auto ? (
+            <>
+              {auto.intro && <p className="tip-intro">{auto.intro}</p>}
+              <ul className="tip-list">
+                {auto.bullets.map((p, i) => <li key={i}>{p}</li>)}
+              </ul>
+            </>
           ) : (
             text
           )}
