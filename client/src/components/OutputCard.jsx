@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { rateJob, saveOutputs } from '../api';
+import MediaViewer from './MediaViewer';
 
 function isVideoUrl(u) {
   return /\.(mp4|webm|mov)$/i.test(u || '') || (u || '').includes('video');
@@ -10,8 +11,9 @@ export default function OutputCard({ result, modelId, notify }) {
   const [rating, setRating] = useState(0);
   const [arch, setArch] = useState(null); // { ok, total, firstErr } | { failed:true }
   const [sel, setSel] = useState(0);
+  const [viewerOpen, setViewerOpen] = useState(false);
   const reqId = result?.requestId;
-  useEffect(() => { setSel(0); setRating(0); setArch(null); }, [reqId]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setSel(0); setRating(0); setArch(null); setViewerOpen(false); }, [reqId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!result?.outputs?.length) return null;
   const outputs = result.outputs;
@@ -50,15 +52,17 @@ export default function OutputCard({ result, modelId, notify }) {
           <a href={url} download title="Download" aria-label="Download" className="w-8 h-8 rounded-lg bg-gray-900 border border-gray-700 text-gray-400 hover:text-white inline-flex items-center justify-center">
             <i className="fas fa-download text-xs"></i>
           </a>
-          <a href={url} target="_blank" rel="noreferrer" title="Open full size" aria-label="Open full size" className="w-8 h-8 rounded-lg bg-gray-900 border border-gray-700 text-gray-400 hover:text-white inline-flex items-center justify-center">
+          <button type="button" onClick={() => setViewerOpen(true)} title="View larger" aria-label="View larger" className="w-8 h-8 rounded-lg bg-gray-900 border border-gray-700 text-gray-400 hover:text-white inline-flex items-center justify-center">
             <i className="fas fa-expand text-xs"></i>
-          </a>
+          </button>
         </div>
       </div>
       {video ? (
         <video src={url} controls autoPlay loop className="w-full max-h-[500px] rounded-xl bg-black" />
       ) : (
-        <img src={url} alt="Generated" className="w-full max-h-[500px] object-contain rounded-xl bg-black" />
+        <button type="button" onClick={() => setViewerOpen(true)} title="View larger" aria-label="View larger" className="w-full cursor-zoom-in">
+          <img src={url} alt="Generated" className="w-full max-h-[500px] object-contain rounded-xl bg-black" />
+        </button>
       )}
       {outputs.length > 1 && (
         <div className="flex gap-1.5 mt-2 overflow-x-auto" role="tablist" aria-label="Outputs">
@@ -93,6 +97,13 @@ export default function OutputCard({ result, modelId, notify }) {
         <ArchStatus arch={arch} />
       </div>
       <ArchiveReporter result={result} modelId={modelId} notify={notify} onDone={setArch} />
+      {viewerOpen && (
+        <MediaViewer
+          url={url}
+          item={{ ...(result || {}), model: modelId, rating: rating || undefined, url }}
+          onClose={() => setViewerOpen(false)}
+        />
+      )}
     </div>
   );
 }

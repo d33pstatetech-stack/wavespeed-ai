@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { fetchModelStats } from '../api';
 import { filterModels } from '../lora-compat';
 
 const GROUPS = [
@@ -16,6 +17,15 @@ const TIER_DOT = {
   no: ['bg-red-500', 'Incompatible with the pinned LoRA (visible via Show all)'],
 };
 
+// Aznten house models: base pattern plus _/- variants.
+const AZNTEN_RE = /az.?nten|asian[-_ ]?ten/i;
+const AZNTEN_EXTRA = /az[_-]?nten|asian[_-]?ten/i;
+function isAzntenModel(m) {
+  const id = m?.id || '';
+  const name = m?.name || '';
+  return AZNTEN_RE.test(id) || AZNTEN_RE.test(name) || AZNTEN_EXTRA.test(id) || AZNTEN_EXTRA.test(name);
+}
+
 // Searchable model picker with category tabs. Props: models, value (id),
 // onSelect(id), focusLoras (pinned LoRA entries filter the list to
 // compatibles), onClearFocus().
@@ -24,6 +34,8 @@ export default function ModelPicker({ models, value, onSelect, focusLoras, onCle
   const [query, setQuery] = useState('');
   const [open, setOpen] = useState(false);
   const [showAllModels, setShowAllModels] = useState(false);
+  const [stats, setStats] = useState([]);
+  const [expanded, setExpanded] = useState({});
   const wrapRef = useRef(null);
 
   useEffect(() => {
@@ -34,6 +46,16 @@ export default function ModelPicker({ models, value, onSelect, focusLoras, onCle
     return () => document.removeEventListener('pointerdown', close);
   }, []);
 
+  useEffect(() => {
+    let live = true;
+    fetchModelStats({ limit: 50 })
+      .then((s) => {
+        if (live) setStats(Array.isArray(s) ? s : []);
+      })
+      .catch(() => {});
+    return () => { live = false; };
+  }, []);
+
   const focusing = Array.isArray(focusLoras) && focusLoras.length > 0;
   const mfilt = useMemo(() => filterModels(models, focusLoras), [models, focusLoras]);
   const tierOf = useMemo(() => {
@@ -42,6 +64,14 @@ export default function ModelPicker({ models, value, onSelect, focusLoras, onCle
     for (const h of mfilt.hiddenItems) m.set(h.model.id, 'no');
     return m;
   }, [mfilt]);
+
+  const runsByModel = useMemo(() => {
+    const mp = new Map();
+    for (const s of stats) {
+      if (s && s.model) mp.set(s.model, { runs: Number(s.runs) || 0, avg_rating: s.avg_rating ?? null });
+    }
+    return mp;
+  }, [stats]);
 
   const filtered = useMemo(() => {
     const base = group === 'all' ? models : models.filter((m) => m.group_of === group);
@@ -63,7 +93,60 @@ export default function ModelPicker({ models, value, onSelect, focusLoras, onCle
     [filtered]
   );
 
+  const favorites = useMemo(() => {
+    const az = models.filter(isAzntenModel);
+    const byUsage = [...models]
+      .sort((a, b) => (runsByModel.get(b.id)?.runs || 0) - (runsByModel.get(a.id)?.runs || 0))
+      .filter((m) => (runsByModel.get(m.id)?.runs || 0) > 0)
+      .slice(0, 10);
+    const union = new Map();
+    for (const m of [...az, ...byUsage]) union.set(m.id, m);
+    let list = [...union.values()];
+    if (group !== 'all') list = list.filter((m) => m.group_of === group);
+    if (focusing && !showAllModels) list = list.filter((m) => (tierOf.get(m.id) || 'likely') !== 'no');
+    list.sort((a, b) => {
+      const aa = isAzntenModel(a) ? 0 : 1;
+      const bb = isAzntenModel(b) ? 0 : 1;
+      if (aa !== bb) return aa - bb;
+      const ra = runsByModel.get(a.id)?.runs || 0;
+      const rb = runsByModel.get(b.id)?.runs || 0;
+      if (rb !== ra) return rb - ra;
+      return (a.name || a.id).localeCompare(b.name || b.id);
+    });
+    return list;
+  }, [models, runsByModel, group, focusing, showAllModels, tierOf]);
+
+  const searching = query.trim().length > 0;
+  const isExpanded = (cat) => (searching ? true : !!expanded[cat]);
+
   const selected = models.find((m) => m.id === value);
+
+  const renderModelButton = (m) => (
+    <button
+      key={m.id}
+      type="button"
+      onClick={() => { onSelect(m.id); setOpen(false); setQuery(''); }}
+      className={`w-full flex items-center gap-2 px-3 py-2 text-left text-xs hover:bg-gray-800 ${
+        m.id === value ? 'text-violet-300 bg-violet-950/40' : 'text-gray-300'
+      }`}
+    >
+      {focusing && (() => {
+        const tier = tierOf.get(m.id) || 'likely';
+        const [dotCls, dotTip] = TIER_DOT[tier] || TIER_DOT.likely;
+        return <span title={dotTip} className={`w-2 h-2 rounded-full flex-none ${dotCls}`}></span>;
+      })()}
+      {isAzntenModel(m) && <span title="Aznten house model" className="flex-none text-amber-300 text-[10px]">★</span>}
+      <span className="truncate flex-1" title={runsByModel.get(m.id)?.runs ? `${m.id} · ${runsByModel.get(m.id).runs} runs` : m.id}>{m.id}</span>
+      {runsByModel.get(m.id)?.runs > 0 && (
+        <span className="flex-none text-[10px] font-mono text-gray-500" title={runsByModel.get(m.id)?.avg_rating != null ? `avg rating ${Number(runsByModel.get(m.id).avg_rating).toFixed(1)}` : undefined}>
+          {runsByModel.get(m.id).runs}×
+        </span>
+      )}
+      <span className="flex-none text-[10px] font-mono text-gray-500">
+        {m.cost > 0 ? `$${m.cost}` : 'Free'}{m.dynamic_pricing ? '*' : ''}
+      </span>
+    </button>
+  );
 
   return (
     <div>
@@ -126,34 +209,32 @@ export default function ModelPicker({ models, value, onSelect, focusLoras, onCle
         </div>
         {open && (
           <div className="absolute z-40 left-0 right-0 mt-1 max-h-72 overflow-y-auto bg-gray-900 border border-gray-700 rounded-lg shadow-xl">
-            {filtered.length === 0 && <div className="p-4 text-sm text-gray-600">No models found</div>}
-            {filtered.map(([cat, ms]) => (
-              <div key={cat}>
-                <div className="px-3 pt-2.5 pb-1 text-[10px] uppercase tracking-wider text-gray-500 sticky top-0 bg-gray-900">
-                  {cat} ({ms.length})
+            {filtered.length === 0 && favorites.length === 0 && <div className="p-4 text-sm text-gray-600">No models found</div>}
+            {favorites.length > 0 && (
+              <div key="__favorites">
+                <div className="px-3 pt-2.5 pb-1 text-[10px] uppercase tracking-wider text-amber-300/90 sticky top-0 bg-gray-900">
+                  ★ Favorites ({favorites.length})
                 </div>
-                {ms.map((m) => (
-                  <button
-                    key={m.id}
-                    type="button"
-                    onClick={() => { onSelect(m.id); setOpen(false); setQuery(''); }}
-                    className={`w-full flex items-center gap-2 px-3 py-2 text-left text-xs hover:bg-gray-800 ${
-                      m.id === value ? 'text-violet-300 bg-violet-950/40' : 'text-gray-300'
-                    }`}
-                  >
-                    {focusing && (() => {
-                      const tier = tierOf.get(m.id) || 'likely';
-                      const [dotCls, dotTip] = TIER_DOT[tier] || TIER_DOT.likely;
-                      return <span title={dotTip} className={`w-2 h-2 rounded-full flex-none ${dotCls}`}></span>;
-                    })()}
-                    <span className="truncate flex-1">{m.id}</span>
-                    <span className="flex-none text-[10px] font-mono text-gray-500">
-                      {m.cost > 0 ? `$${m.cost}` : 'Free'}{m.dynamic_pricing ? '*' : ''}
-                    </span>
-                  </button>
-                ))}
+                {favorites.map(renderModelButton)}
               </div>
-            ))}
+            )}
+            {filtered.map(([cat, ms]) => {
+              const openCat = isExpanded(cat);
+              return (
+                <div key={cat}>
+                  <button
+                    type="button"
+                    onClick={() => setExpanded((e) => ({ ...e, [cat]: !e[cat] }))}
+                    aria-expanded={openCat}
+                    className="w-full flex items-center gap-1.5 px-3 pt-2.5 pb-1 text-[10px] uppercase tracking-wider text-gray-500 sticky top-0 bg-gray-900 hover:text-gray-300 text-left"
+                  >
+                    <i className={`fas fa-chevron-${openCat ? 'down' : 'right'} text-[9px] flex-none`}></i>
+                    <span className="truncate">{cat} ({ms.length})</span>
+                  </button>
+                  {openCat && ms.map(renderModelButton)}
+                </div>
+              );
+            })}
           </div>
         )}
       </div>

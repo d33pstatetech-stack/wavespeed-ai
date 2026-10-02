@@ -115,6 +115,14 @@ export async function rateJob({ externalJobId, rating }) {
   return json(res);
 }
 
+export async function fetchModelStats({ limit = 50 } = {}) {
+  const res = await fetch(`${API}/api/history/model-stats?limit=${encodeURIComponent(limit)}`);
+  const data = await json(res);
+  if (!res.ok) throw new Error(errText(data.message || data.error, `Model stats failed (${res.status})`));
+  if (Array.isArray(data)) return data;
+  return data.models || data.stats || [];
+}
+
 export async function cloudList({ prefix = '', flat = false, cursor = null } = {}) {
   // Worker uses `recursive=1` for flat listing (same contract as the MuAPI worker).
   const q = new URLSearchParams({ prefix, ...(flat ? { recursive: '1' } : {}), ...(cursor ? { cursor } : {}) });

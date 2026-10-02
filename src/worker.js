@@ -1094,6 +1094,25 @@ async function handleApiRoute(request, env, path, ctx) {
     } catch (e) { return jsonResponse({ error: e.message }, 500); }
   }
 
+  if (path === '/api/history/model-stats' && request.method === 'GET') {
+    const H = histDB(env);
+    if (!H) return jsonResponse({ error: 'HISTORY not configured' }, 500);
+    const q = new URL(request.url);
+    const limit = Math.min(parseInt(q.searchParams.get('limit') || '50', 10) || 50, 200);
+    const conds = [], vals = [];
+    for (const [k, col] of [['provider', 'provider'], ['source_app', 'source_app'], ['status', 'status']]) {
+      const v = q.searchParams.get(k);
+      if (v) { conds.push(`${col} = ?`); vals.push(v); }
+    }
+    try {
+      const { results } = await H.prepare(
+        `SELECT model, COUNT(*) as runs, AVG(rating) as avg_rating FROM runs${conds.length ? ' WHERE ' + conds.join(' AND ') : ''} GROUP BY model ORDER BY runs DESC LIMIT ?`
+      ).bind(...vals, limit).all();
+      const stats = (results || []).map((r) => ({ model: r.model, runs: r.runs, avg_rating: r.avg_rating }));
+      return jsonResponse({ models: stats, total: stats.length });
+    } catch (e) { return jsonResponse({ error: e.message }, 500); }
+  }
+
   // ─── GET /api/health ───
   if (path === '/api/health') {
     const modelCount = await DB.prepare('SELECT COUNT(*) as count FROM models').first();

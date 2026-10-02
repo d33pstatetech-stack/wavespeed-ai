@@ -15,10 +15,11 @@ body {
 
 /* Reusable bits (mirror the old styles.css vocabulary) */
 .panel {
-  background: rgba(17, 24, 39, 0.7); /* gray-900/70 */
-  border: 1px solid #1f2937; /* gray-800 */
+  background: rgba(30, 41, 59, 0.85); /* slate-800/85 — lifted for contrast */
+  border: 1px solid #374151; /* gray-700 — brighter edge */
   border-radius: 0.75rem;
   padding: 1rem;
+  box-shadow: 0 0 28px rgba(139, 92, 246, 0.1); /* dull violet glow */
 }
 
 .panel-title {
@@ -29,7 +30,7 @@ body {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: #9ca3af; /* gray-400 */
+  color: #ddd6fe; /* violet-200 — brighter accent */
   margin-bottom: 0.75rem;
 }
 
