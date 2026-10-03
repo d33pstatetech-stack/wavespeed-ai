@@ -19,6 +19,7 @@ import {
   withSchema,
 } from "./lib/api";
 import { tierFor } from "./lib/tiers";
+import type { App } from "./lib/loraFormats";
 import { useMediaQuery, usePersistentState } from "./lib/hooks";
 import { USER_LORAS, NSFW_LORAS, isAzntenLora } from "./loras-data";
 import { buildSubmitParams } from "./params";
@@ -37,6 +38,10 @@ function seedLibrary(): Lora[] {
   NSFW_LORAS.forEach((e: any) => push(e, true));
   return out;
 }
+
+/* Which provider this build talks to. Decides the LoRA value format the UI
+   offers, and which confirmed model+LoRA pairs count as verified. */
+const APP_ID: App = 'wavespeed';
 
 function Console() {
   const { toast, toastUndo } = useToast();
@@ -176,7 +181,7 @@ function Console() {
       pinned
         .map((id) => library.find((l) => l.id === id))
         .filter(Boolean)
-        .map((l) => ({ ...(l as Lora), compatTier: tierFor(model, [l as Lora]) })) as Lora[],
+        .map((l) => ({ ...(l as Lora), compatTier: tierFor(model, [l as Lora], APP_ID) })) as Lora[],
     [pinned, library, model],
   );
 
@@ -464,6 +469,7 @@ function Console() {
         onAddCustom={addCustom}
         onRemoveCustom={removeCustom}
         model={model}
+        app={APP_ID}
       />
 
       <Dialog open={resultsOpen && mid && !wide} onClose={() => setResultsOpen(false)} title="Results" size="lg">

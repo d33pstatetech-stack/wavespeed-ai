@@ -3,9 +3,12 @@ import Icon from "../ui/Icon";
 import { Badge, Dialog, EmptyState, Segmented, TierBadge, Tip } from "../ui/primitives";
 import { useToast } from "../ui/Toasts";
 import { resolveLoraUrl } from "../lib/api";
+import { insertFormat, isConfirmed } from "../lib/loraFormats";
+import type { App } from "../lib/loraFormats";
+import { tierForOne } from "../lib/tiers";
 import type { Lora, Model } from "../lib/types";
 
-type Group_ = "all" | "aznten" | "misc" | "nsfw";
+type Group_ = "all" | "aznten" | "misc" | "nsfw" | "confirmed";
 
 export default function LoraDialog({
   open,
@@ -16,6 +19,7 @@ export default function LoraDialog({
   onAddCustom,
   onRemoveCustom,
   model,
+  app,
 }: {
   open: boolean;
   onClose: () => void;
@@ -25,6 +29,7 @@ export default function LoraDialog({
   onAddCustom: (l: Lora) => Promise<void>;
   onRemoveCustom: (l: Lora) => Promise<void>;
   model: Model | null;
+  app: App;
 }) {
   const { toast } = useToast();
   const [q, setQ] = useState("");
@@ -38,8 +43,9 @@ export default function LoraDialog({
       aznten: loras.filter((l) => l.entry?.isAznten).length,
       misc: loras.filter((l) => l.entry && !l.entry?.isAznten && !l.entry?.isNsfw).length,
       nsfw: loras.filter((l) => l.entry?.isNsfw).length,
+      confirmed: model ? loras.filter((l) => isConfirmed(app, model.id, l.id)).length : 0,
     }),
-    [loras],
+    [loras, model, app],
   );
 
   const list = useMemo(() => {
@@ -48,6 +54,7 @@ export default function LoraDialog({
     if (group === "aznten") base = base.filter((l) => l.entry?.isAznten);
     else if (group === "misc") base = base.filter((l) => l.entry && !l.entry?.isAznten && !l.entry?.isNsfw);
     else if (group === "nsfw") base = base.filter((l) => l.entry?.isNsfw);
+    else if (group === "confirmed") base = model ? base.filter((l) => isConfirmed(app, model.id, l.id)) : [];
     if (s) {
       base = base.filter(
         (l) =>
@@ -56,8 +63,11 @@ export default function LoraDialog({
           l.triggers.some((t) => t.toLowerCase().includes(s)),
       );
     }
-    // Pinned first, then adapters that match the selected model's family.
+    // Confirmed pairs first, then pinned, then family matches.
     return [...base].sort((a, b) => {
+      const ca = model && isConfirmed(app, model.id, a.id) ? 0 : 1;
+      const cb = model && isConfirmed(app, model.id, b.id) ? 0 : 1;
+      if (ca !== cb) return ca - cb;
       const pa = pinned.includes(a.id) ? 0 : 1;
       const pb = pinned.includes(b.id) ? 0 : 1;
       if (pa !== pb) return pa - pb;
@@ -65,11 +75,11 @@ export default function LoraDialog({
       const mb = model && b.baseFamily && b.baseFamily === model.baseFamily ? 0 : 1;
       return ma - mb || a.name.localeCompare(b.name);
     });
-  }, [loras, q, group, pinned, model]);
+  }, [loras, q, group, pinned, model, app]);
 
-  /* Real resolution through the Worker, which fetches the model card and works
-     out the weight file, base model and trigger words. The mockup regex-parsed
-     the URL in the browser and guessed the rest. */
+  /* Real resolution through the Worker, which reads the model card to find the
+     weight file, base model and trigger words. Accepts any CivitAI mirror
+     (civitai.com, civitai.red, ...) because the worker normalises the host. */
   async function resolve() {
     const u = url.trim();
     if (!u) return;
@@ -79,6 +89,7 @@ export default function LoraDialog({
       const found: any[] = Array.isArray(res) ? res : res.loras || res.entries || (res.repo ? [res] : []);
       if (!found.length) throw new Error("No LoRA found at that address");
       for (const f of found) {
+        const fmt = insertFormat(app, f);
         await onAddCustom({
           id: String(f.id || f.repo || u),
           name: f.name || f.repo || u,
@@ -89,9 +100,12 @@ export default function LoraDialog({
           custom: true,
           entry: f,
         });
+        if (fmt) {
+          toast(`Added ${f.name || f.repo}`, "success", `Paste this into the field: ${fmt.value}`);
+        }
       }
       setUrl("");
-      toast(`Added ${found.length} adapter${found.length === 1 ? "" : "s"}`, "success", found.map((f) => f.name || f.repo).join(", "));
+      toast(`Added ${found.length} adapter${found.length === 1 ? "" : "s"}`, "success");
     } catch (e) {
       toast("Could not resolve that URL", "error", (e as Error).message);
     } finally {
@@ -104,12 +118,13 @@ export default function LoraDialog({
       open={open}
       onClose={onClose}
       title="LoRA adapters"
-      description="Pin adapters to filter the catalogue to models that can actually load them."
+      description="Pin adapters to filter the catalogue. Adapters marked Confirmed produced a real image with this model."
       size="lg"
       footer={
         <>
           <span className="mr-auto text-micro text-t3">
             {pinned.length} pinned · {loras.length} in library
+            {model && counts.confirmed > 0 ? ` · ${counts.confirmed} confirmed for this model` : ""}
           </span>
           <button type="button" onClick={onClose} className="btn btn-primary">
             Done
@@ -121,7 +136,7 @@ export default function LoraDialog({
         <div className="well p-3">
           <label htmlFor="lora-url" className="mb-1.5 flex items-center gap-1.5 text-fine font-medium text-t1">
             Add from URL
-            <Tip text="Paste a Hugging Face or CivitAI model-card link. The Worker reads the model card to find the weight file, base model and trigger words." />
+            <Tip text="HuggingFace or any CivitAI mirror, including civitai.red. The Worker reads the model card to find the weight file, base model and trigger words." />
           </label>
           <div className="flex flex-wrap gap-2">
             <input
@@ -130,8 +145,8 @@ export default function LoraDialog({
               value={url}
               onChange={(e) => setUrl(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && resolve()}
-              placeholder="https://huggingface.co/owner/repo"
-              className="field min-w-0 flex-1"
+              placeholder="https://huggingface.co/owner/repo  or  https://civitai.red/models/123456/name"
+              className="field min-w-0 flex-1 font-mono"
             />
             <button type="button" onClick={resolve} disabled={adding || !url.trim()} className="btn btn-primary gap-2">
               {adding ? <Icon name="refresh" className="size-4" /> : <Icon name="plus" className="size-4" />}
@@ -158,6 +173,7 @@ export default function LoraDialog({
           label="Filter by group"
           options={[
             { value: "all", label: `All ${counts.all}` },
+            ...(counts.confirmed > 0 ? [{ value: "confirmed" as Group_, label: `Confirmed ${counts.confirmed}` }] : []),
             { value: "aznten", label: `Aznten ${counts.aznten}` },
             { value: "misc", label: `Misc ${counts.misc}` },
             { value: "nsfw", label: `NSFW ${counts.nsfw}` },
@@ -170,11 +186,14 @@ export default function LoraDialog({
           <ul className="grid gap-2">
             {list.map((l) => {
               const on = pinned.includes(l.id);
+              const tier = model ? tierForOne(model, l, app) : null;
+              const confirmed = !!model && isConfirmed(app, model.id, l.id);
+              const fmt = insertFormat(app, l.entry || { repo_url: l.repo, file_url: l.entry?.file_url });
               return (
                 <li key={l.id}>
                   <div
                     className={`flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl p-2.5 ring-1 transition ${
-                      on ? "bg-accent/12 ring-accent/40" : "bg-s1 ring-line hover:ring-line2"
+                      confirmed ? "bg-pass/8 ring-pass/35" : on ? "bg-accent/12 ring-accent/40" : "bg-s1 ring-line hover:ring-line2"
                     }`}
                   >
                     <button
@@ -194,10 +213,32 @@ export default function LoraDialog({
                       <p className="truncate font-mono text-micro text-t3">{l.repo}</p>
                     </div>
 
-                    {l.compatTier && <TierBadge tier={l.compatTier} />}
+                    {confirmed ? (
+                      <Badge tone="pass">
+                        <Icon name="check" className="size-3" />
+                        Confirmed
+                      </Badge>
+                    ) : (
+                      tier && <TierBadge tier={tier} />
+                    )}
                     <Badge tone="neutral">
                       {l.source === "civitai" ? "CivitAI" : l.source === "custom" ? "Custom" : "HF"}
                     </Badge>
+
+                    {fmt && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          navigator.clipboard?.writeText(fmt.value);
+                          toast("Copied the format this app accepts", "success", fmt.note);
+                        }}
+                        className="btn btn-sm btn-quiet gap-1.5"
+                        aria-label={`Copy the accepted value for ${l.name}`}
+                      >
+                        <Icon name="copy" className="size-3.5" />
+                        Copy value
+                      </button>
+                    )}
 
                     {l.custom && (
                       <button
@@ -209,6 +250,8 @@ export default function LoraDialog({
                         <Icon name="trash" className="size-3.5" />
                       </button>
                     )}
+
+                    {fmt && <p className="w-full font-mono text-micro text-t3">{fmt.note}</p>}
 
                     {l.triggers.length > 0 && (
                       <p className="w-full text-micro text-t3">

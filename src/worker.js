@@ -1318,7 +1318,7 @@ async function fetchJsonUpstream(url, env, timeoutMs = 25000) {
   try {
     const headers = { 'User-Agent': LORA_UA, Accept: 'application/json' };
     if (/huggingface\.co/.test(url) && env.HUGGINGFACE_API_KEY) headers.Authorization = `Bearer ${env.HUGGINGFACE_API_KEY}`;
-    if (/civitai\.com/.test(url) && env.CIVITAI_API_KEY) headers.Authorization = `Bearer ${env.CIVITAI_API_KEY}`;
+    if (/civitai\.[a-z]{2,6}/.test(url) && env.CIVITAI_API_KEY) headers.Authorization = `Bearer ${env.CIVITAI_API_KEY}`;
     const res = await fetch(url, { headers, signal: ctrl.signal });
     if ((res.status === 401 || res.status === 403) && headers.Authorization) {
       // Retry anonymously: distinguishes nonexistent (404) from gated/private (still denied).
@@ -1418,7 +1418,7 @@ async function resolveLoraUrl(url, env) {
   const u = String(url || '').trim();
   let m = u.match(/huggingface\.co\/([^/\s?#]+)\/([^/\s?#]+)/i);
   if (m) return resolveHuggingFace(m[1], m[2].replace(/\/$/, ''), env);
-  m = u.match(/civitai\.com\/models\/(\d+)/i);
+  m = u.match(/civitai\.[a-z]{2,6}\/models\/(\d+)/i);
   if (m) {
     let ver = null;
     try { ver = new URL(u).searchParams.get('modelVersionId'); } catch { /* ignore */ }
@@ -1426,7 +1426,7 @@ async function resolveLoraUrl(url, env) {
   }
   m = u.match(/^civitai:(\d+)(?:@(\d+))?$/i);
   if (m) return resolveCivitai(m[1], m[2] || null, env);
-  throw new Error('URL must be a huggingface.co/{owner}/{repo} or civitai.com/models/{id} link (civitai:ID[@VERSION] also works)');
+  throw new Error('URL must be a huggingface.co/{owner}/{repo} or civitai.com/models/{id} link (any CivitAI mirror such as civitai.red also works; civitai:ID[@VERSION] too)');
 }
 
 // Self-migrating: production D1 can't be touched from here, so handlers ensure
