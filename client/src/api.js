@@ -242,16 +242,32 @@ export async function streamEnhance({ rawPrompt, modelId, params, signal, onToke
   }
 }
 
-// Add-from-URL: resolve an HF/CivitAI model-card URL to LoRA file(s).
-export async function resolveLoraUrl(url) {
-  const res = await fetch(`${API}/api/lora/resolve`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ url }),
-  });
-  const data = await json(res);
-  if (!res.ok) throw new Error(errText(data.error, `Resolve failed (${res.status})`));
-  return data;
+// Add-from-URL: resolve an HF/CivitAI model-card URL (or direct .safetensors
+// file URL) to LoRA file(s). 60s client timeout so a dead CDN host fails
+// visibly instead of hanging the button.
+export async function resolveLoraUrl(url, opts = {}) {
+  const timeoutMs = opts.timeoutMs ?? 60000;
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  const onAbort = () => ctrl.abort();
+  opts.signal && opts.signal.addEventListener('abort', onAbort);
+  try {
+    const res = await fetch(`${API}/api/lora/resolve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url }),
+      signal: ctrl.signal,
+    });
+    const data = await json(res);
+    if (!res.ok) throw new Error(errText(data.error, `Resolve failed (${res.status})`));
+    return data;
+  } catch (e) {
+    if (e?.name === 'AbortError') throw new Error('Resolve timed out after 60s — the host may be unreachable or the CDN link expired');
+    throw e;
+  } finally {
+    clearTimeout(timer);
+    opts.signal && opts.signal.removeEventListener('abort', onAbort);
+  }
 }
 
 export async function fetchCustomLoras() {

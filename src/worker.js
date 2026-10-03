@@ -696,7 +696,7 @@ async function handleApiRoute(request, env, path, ctx) {
     const name = String(body.name || repo || '').trim();
     const file = String(body.file || '').trim();
     const fileUrl = String(body.file_url || '').trim();
-    if (!['hf', 'civitai'].includes(source)) return jsonResponse({ error: 'source must be hf or civitai' }, 400);
+    if (!['hf', 'civitai', 'direct'].includes(source)) return jsonResponse({ error: 'source must be hf, civitai or direct' }, 400);
     if (!repo || !name) return jsonResponse({ error: 'repo and name are required' }, 400);
     if (!/^https?:\/\//.test(fileUrl)) return jsonResponse({ error: 'file_url must be a full https URL' }, 400);
     const triggers = Array.isArray(body.triggers) ? body.triggers.map(String).slice(0, 12) : [];
@@ -1426,6 +1426,37 @@ async function resolveLoraUrl(url, env) {
   }
   m = u.match(/^civitai:(\d+)(?:@(\d+))?$/i);
   if (m) return resolveCivitai(m[1], m[2] || null, env);
+  // Direct .safetensors file on any host (temporary CDN links included).
+  let normalized = u;
+  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(normalized)) normalized = 'https://' + normalized;
+  let parsed = null;
+  try { parsed = new URL(normalized); } catch { parsed = null; }
+  if (parsed && /\.safetensors$/i.test(parsed.pathname)) {
+    const host = parsed.hostname;
+    const ctrl = new AbortController();
+    const to = setTimeout(() => ctrl.abort(), 20000);
+    try {
+      const res = await fetch(parsed.toString(), { method: 'GET', headers: { Range: 'bytes=0-1023', 'User-Agent': LORA_UA }, signal: ctrl.signal });
+      if (res.status !== 200 && res.status !== 206) throw new Error(`${host} host unreachable or file expired (Wavespeed CDN links expire — re-download and re-host, e.g. HuggingFace)`);
+      try { await res.arrayBuffer(); } catch { /* ignore body errors */ }
+    } catch (e) {
+      const msg = String((e && e.message) || '');
+      if (msg.includes('host unreachable or file expired')) throw e;
+      throw new Error(`${host} host unreachable or file expired (Wavespeed CDN links expire — re-download and re-host, e.g. HuggingFace)`);
+    } finally {
+      clearTimeout(to);
+    }
+    const rawBase = (parsed.pathname.split('/').pop() || 'lora').split('?')[0].split('#')[0];
+    const base = rawBase.replace(/\.safetensors$/i, '') || 'lora';
+    const fileUrl = parsed.toString();
+    return {
+      source: 'direct', repo: host, name: base,
+      file: rawBase, file_name: rawBase, file_url: fileUrl, repo_url: `${parsed.origin}${parsed.pathname}`,
+      triggers: [], base_model: '', pipeline: 'text-to-image', nsfw: false,
+      candidates: [{ file: rawBase, file_url: fileUrl, recommended: true }],
+      formats: { muapi: fileUrl, replicate: fileUrl, wavespeed: fileUrl },
+    };
+  }
   throw new Error('URL must be a huggingface.co/{owner}/{repo} or civitai.com/models/{id} link (any CivitAI mirror such as civitai.red also works; civitai:ID[@VERSION] too)');
 }
 

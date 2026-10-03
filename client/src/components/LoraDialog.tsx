@@ -34,6 +34,7 @@ export default function LoraDialog({
   const { toast } = useToast();
   const [q, setQ] = useState("");
   const [url, setUrl] = useState("");
+  const [nameOverride, setNameOverride] = useState("");
   const [adding, setAdding] = useState(false);
   const [group, setGroup] = useState<Group_>("all");
 
@@ -79,35 +80,44 @@ export default function LoraDialog({
 
   /* Real resolution through the Worker, which reads the model card to find the
      weight file, base model and trigger words. Accepts any CivitAI mirror
-     (civitai.com, civitai.red, ...) because the worker normalises the host. */
+     (civitai.com, civitai.red, ...) because the worker normalises the host,
+     plus direct .safetensors file URLs on any host (validated server-side
+     with a ranged GET so a dead CDN fails visibly). */
+  const ephemeralHost = /cloudfront\.net|wavespeed|replicate\.delivery|fbcdn|googleusercontent/i.test(url);
   async function resolve() {
-    const u = url.trim();
-    if (!u) return;
+    const raw = url.trim();
+    if (!raw) return;
+    const u = /:\/\//.test(raw) ? raw : `https://${raw}`;
+    const customName = nameOverride.trim();
     setAdding(true);
     try {
       const res: any = await resolveLoraUrl(u);
       const found: any[] = Array.isArray(res) ? res : res.loras || res.entries || (res.repo ? [res] : []);
       if (!found.length) throw new Error("No LoRA found at that address");
       for (const f of found) {
-        const fmt = insertFormat(app, f);
+        const name = customName || f.name || f.repo || u;
+        const fmt = insertFormat(app, { ...f, name });
         await onAddCustom({
-          id: String(f.id || f.repo || u),
-          name: f.name || f.repo || u,
-          source: /civitai/i.test(u) ? "civitai" : "huggingface",
+          id: String(f.id || f.file_url || f.repo || u),
+          name,
+          source: f.source === "direct" ? "custom" : /civitai/i.test(u) ? "civitai" : "huggingface",
           repo: String(f.repo || f.id || u),
           baseFamily: "",
           triggers: Array.isArray(f.triggers) ? f.triggers : [],
           custom: true,
-          entry: f,
+          entry: { ...f, name },
         });
         if (fmt) {
-          toast(`Added ${f.name || f.repo}`, "success", `Paste this into the field: ${fmt.value}`);
+          toast(`Added ${name}`, "success", `Paste this into the field: ${fmt.value}`);
         }
       }
       setUrl("");
+      setNameOverride("");
       toast(`Added ${found.length} adapter${found.length === 1 ? "" : "s"}`, "success");
     } catch (e) {
-      toast("Could not resolve that URL", "error", (e as Error).message);
+      const msg = (e as Error).message || "";
+      if (/timed out|timeout|aborted|abort/i.test(msg)) toast("Resolve timed out", "error", msg);
+      else toast("Could not resolve that URL", "error", msg);
     } finally {
       setAdding(false);
     }
@@ -136,7 +146,7 @@ export default function LoraDialog({
         <div className="well p-3">
           <label htmlFor="lora-url" className="mb-1.5 flex items-center gap-1.5 text-fine font-medium text-t1">
             Add from URL
-            <Tip text="HuggingFace or any CivitAI mirror, including civitai.red. The Worker reads the model card to find the weight file, base model and trigger words." />
+            <Tip text="HuggingFace, any CivitAI mirror (including civitai.red), or a direct .safetensors file URL. The Worker reads the model card (or validates the file with a ranged GET) to find the weight file, base model and trigger words." />
           </label>
           <div className="flex flex-wrap gap-2">
             <input
@@ -145,14 +155,29 @@ export default function LoraDialog({
               value={url}
               onChange={(e) => setUrl(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && resolve()}
-              placeholder="https://huggingface.co/owner/repo  or  https://civitai.red/models/123456/name"
+              placeholder="https://huggingface.co/owner/repo  or  https://…safetensors"
               className="field min-w-0 flex-1 font-mono"
+            />
+            <input
+              id="lora-name"
+              type="text"
+              value={nameOverride}
+              onChange={(e) => setNameOverride(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && resolve()}
+              placeholder="Name (optional) — e.g. aznten-style"
+              aria-label="Custom name (optional)"
+              className="field w-44"
             />
             <button type="button" onClick={resolve} disabled={adding || !url.trim()} className="btn btn-primary gap-2">
               {adding ? <Icon name="refresh" className="size-4" /> : <Icon name="plus" className="size-4" />}
               {adding ? "Resolving…" : "Resolve"}
             </button>
           </div>
+          {ephemeralHost && (
+            <p className="mt-2 rounded-lg bg-warn/10 px-2.5 py-1.5 text-micro text-warn ring-1 ring-warn/25">
+              Temporary CDN links expire — upload to HuggingFace for a permanent entry
+            </p>
+          )}
         </div>
 
         <div className="relative">

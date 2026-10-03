@@ -23,6 +23,8 @@ export default function Composer({
   onEnhanced,
   job,
   onBrowseModels,
+  adhocLora,
+  setAdhocLora,
 }: {
   model: Model | null;
   schema: ModelSchema | null;
@@ -38,6 +40,8 @@ export default function Composer({
   onEnhanced: (text: string, historyId: number | null) => void;
   job: Job | null;
   onBrowseModels: () => void;
+  adhocLora: string;
+  setAdhocLora: (s: string) => void;
 }) {
   const { toast } = useToast();
   const [enhanced, setEnhanced] = useState("");
@@ -288,6 +292,21 @@ export default function Composer({
           <Icon name="plus" className="size-3.5" />
           Manage LoRAs
         </button>
+        <div className="w-full">
+          <label htmlFor="adhoc-lora" className="mb-1 flex items-center gap-1.5 text-micro font-medium text-t2">
+            Ad-hoc LoRA
+            <Tip text="This run only — never saved. Direct .safetensors URL, HuggingFace owner/repo, full HuggingFace file URL, or civitai:ID. Merged into the run as {path, scale} at submit time." />
+          </label>
+          <input
+            id="adhoc-lora"
+            type="text"
+            value={adhocLora}
+            onChange={(e) => setAdhocLora(e.target.value)}
+            placeholder="https://…safetensors  or  owner/repo  or  civitai:123"
+            aria-label="Ad-hoc LoRA (this run only)"
+            className="field font-mono"
+          />
+        </div>
       </div>
 
       {/* ---------- parameters ---------- */}

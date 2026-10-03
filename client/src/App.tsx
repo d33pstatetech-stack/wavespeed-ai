@@ -20,6 +20,7 @@ import {
 } from "./lib/api";
 import { tierFor } from "./lib/tiers";
 import type { App } from "./lib/loraFormats";
+import { insertFormat } from "./lib/loraFormats";
 import { useMediaQuery, usePersistentState } from "./lib/hooks";
 import { USER_LORAS, NSFW_LORAS, isAzntenLora } from "./loras-data";
 import { buildSubmitParams } from "./params";
@@ -43,6 +44,35 @@ function seedLibrary(): Lora[] {
    offers, and which confirmed model+LoRA pairs count as verified. */
 const APP_ID: App = 'wavespeed';
 
+/* Customs flow through the same regex-on-name grouping as the seed library,
+   so a custom named aznten-* lands in the Aznten tab. Seed grouping is
+   unchanged. */
+function tagCustomEntry(entry: any) {
+  return { ...entry, isAznten: isAzntenLora(entry), isNsfw: !!entry?.nsfw };
+}
+
+/* Ad-hoc LoRA (this run only, never saved): direct .safetensors URL, HF
+   owner/repo, full HF file URL, or civitai:ID → entry for insertFormat. */
+function adhocEntryForInput(raw: string): any {
+  const t = String(raw || '').trim();
+  if (!t) return null;
+  const cm = t.match(/^civitai:(\d+)(?:@\d+)?$/i);
+  if (cm) return { id: `civitai:${cm[1]}`, repo_url: `https://civitai.com/models/${cm[1]}` };
+  let withScheme = /:\/\//.test(t) ? t : `https://${t}`;
+  try {
+    const u = new URL(withScheme);
+    if (/\.safetensors$/i.test(u.pathname)) return { file_url: u.toString(), repo_url: u.toString() };
+    const hm = withScheme.match(/huggingface\.co\/([^/\s?#]+)\/([^/\s?#]+)/i);
+    if (hm) {
+      const repo = `${hm[1]}/${hm[2].replace(/\/$/, '')}`;
+      return { id: repo, repo_url: `https://huggingface.co/${repo}` };
+    }
+  } catch { /* not a URL — fall through to bare repo */ }
+  if (/^[^/\s:]+\/[^/\s:]+$/.test(t)) return { id: t };
+  if (/^https?:\/\//i.test(withScheme)) return { file_url: withScheme, repo_url: withScheme };
+  return { file_url: t, repo_url: t };
+}
+
 function Console() {
   const { toast, toastUndo } = useToast();
 
@@ -65,6 +95,8 @@ function Console() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [enhancementId, setEnhancementId] = useState<number | null>(null);
   const [library, setLibrary] = useState<Lora[]>(seedLibrary);
+  /* Ad-hoc LoRA for this run only — never saved to the library or D1. */
+  const [adhocLora, setAdhocLora] = useState("");
 
   const abort = useRef<AbortController | null>(null);
 
@@ -99,7 +131,7 @@ function Console() {
       if (!live || !rows.length) return;
       setLibrary((ls) => {
         const have = new Set(ls.map((l) => l.id));
-        return [...ls, ...rows.filter((r: any) => !have.has(String(r.id))).map((r: any) => toLora(r, true))];
+        return [...ls, ...rows.filter((r: any) => !have.has(String(r.id))).map((r: any) => toLora(tagCustomEntry(r), true))];
       });
     });
     return () => {
@@ -192,6 +224,32 @@ function Console() {
     abort.current = ac;
     const started = Date.now();
     const submitParams = buildSubmitParams(prompt, params);
+    // Ad-hoc LoRA (this run only, never saved): convert via insertFormat and
+    // merge into the run input's loras value as {path, scale} objects.
+    const adhocRaw = adhocLora.trim();
+    if (adhocRaw) {
+      const entry = adhocEntryForInput(adhocRaw);
+      const fmt = entry ? insertFormat(APP_ID, entry) : null;
+      const path = fmt ? fmt.value : adhocRaw;
+      const obj = { path, scale: 1 };
+      let key = "loras";
+      if (Array.isArray((submitParams as any).loras)) key = "loras";
+      else if (Array.isArray((submitParams as any).lora_list)) key = "lora_list";
+      else {
+        const existing = Object.keys(submitParams).find((k) => /lora|adapter/i.test(k));
+        if (existing) key = existing;
+        else if (schema) {
+          const found = Object.keys(schema.params || {}).find(
+            (k) => /lora|adapter/i.test(k) && !/scale|strength|weight/i.test(k),
+          );
+          if (found) key = found;
+        }
+      }
+      const cur = (submitParams as any)[key];
+      if (Array.isArray(cur)) (submitParams as any)[key] = [...cur, obj];
+      else if (cur && typeof cur === "object") (submitParams as any)[key] = [cur, obj];
+      else (submitParams as any)[key] = [obj];
+    }
     const kind = model.group === "video" ? "video" : "image";
 
     let cost = model.cost || 0;
@@ -254,7 +312,7 @@ function Console() {
         toast("Generation failed", "error", (e as Error).message);
       }
     }
-  }, [model, prompt, params, job?.status, mid, setRuns, toast]);
+  }, [model, prompt, params, adhocLora, schema, job?.status, mid, setRuns, toast]);
 
   const onEnhanced = useCallback((_text: string, historyId: number | null) => setEnhancementId(historyId), []);
 
@@ -265,9 +323,11 @@ function Console() {
 
   const addCustom = useCallback(
     async (l: Lora) => {
-      setLibrary((ls) => [l, ...ls.filter((x) => x.id !== l.id)]);
+      const taggedEntry = tagCustomEntry({ ...(l.entry || {}), name: l.name, id: l.id });
+      const tagged: Lora = { ...l, entry: taggedEntry };
+      setLibrary((ls) => [tagged, ...ls.filter((x) => x.id !== tagged.id)]);
       try {
-        await saveCustomLora(l.entry || { repo: l.repo, name: l.name });
+        await saveCustomLora(tagged.entry || { repo: tagged.repo, name: tagged.name });
       } catch (e) {
         toast("Saved locally, but the server rejected it", "error", (e as Error).message);
       }
@@ -347,6 +407,8 @@ function Console() {
       onEnhanced={onEnhanced}
       job={job}
       onBrowseModels={focusCatalogSearch}
+      adhocLora={adhocLora}
+      setAdhocLora={setAdhocLora}
     />
   );
 
