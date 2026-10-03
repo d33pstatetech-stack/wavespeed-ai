@@ -20,7 +20,7 @@ export function isLoraParam(name, spec = {}) {
 }
 
 export function loraHintText() {
-  return 'Best first: a full https://….safetensors URL (required on WaveSpeed — civitai: shorthand is NOT supported)\nHuggingFace owner/repo works on some endpoints\nMulti-LoRA fields take one per line (commas also work)';
+  return 'Verified against live runs on wavespeed-ai/krea-v2/turbo-lora:\n  WORKS  https://REPO/resolve/main/FILE.safetensors\n  WORKS  owner/repo for a public HuggingFace repo\n  The field takes objects, not text: {path, scale}. Sent for you.\n  FAILS  a bare string - WaveSpeed answers "loras.0 must be an object"\n  FAILS  civitai:MODEL@VERSION - not supported\n  FAILS  {url: ...} - the key must be "path"\n  Multi-LoRA fields take one per line (commas also work)';
 }
 
 export function sizeHintText() {
