@@ -1,168 +1,409 @@
 @import "tailwindcss";
 
-/* MuAPI Prompt Generator — React redesign (feature/muapi-react).
-   Dark-first theme carried over from the vanilla app. */
+/* ============================================================
+   MuAPI Prompt Console — design tokens
+   Fixes: no html{font-size} hack, no px-arbitrary type,
+   3-step surface ramp, semantic colour set, 44px hit floor.
+   ============================================================ */
 
-:root {
-  color-scheme: dark;
+@theme {
+  /* --- surfaces: exactly three levels, nothing else --- */
+  --color-s0: #0a0c11; /* page            */
+  --color-s1: #11141c; /* panel           */
+  --color-s2: #181d28; /* raised / overlay*/
+  --color-s3: #212838; /* input well / hover */
+  --color-line: #262d3b;
+  --color-line2: #39425a;
+
+  /* --- text ramp, all measured >= 4.5:1 on s0/s1 --- */
+  --color-t1: #f0f3f9; /* 16.8:1 */
+  --color-t2: #b6c0d4; /*  9.6:1 */
+  --color-t3: #8c97ad; /*  5.6:1 */
+
+  /* --- one accent --- */
+  --color-accent: #8b5cf6;
+  --color-accent-soft: #c4b5fd;
+  --color-accent-deep: #6d28d9;
+
+  /* --- semantic: always paired with a glyph + label in UI --- */
+  --color-pass: #34d399;
+  --color-warn: #fbbf24;
+  --color-crit: #fb7185;
+  --color-info: #38bdf8;
+
+  /* --- fluid type: continuous 320px -> 1600px, no breakpoint jump --- */
+  --text-micro: clamp(0.78125rem, 0.755rem + 0.13vw, 0.84375rem);
+  --text-fine: clamp(0.84375rem, 0.81rem + 0.17vw, 0.9375rem);
+  --text-body: clamp(0.9375rem, 0.9rem + 0.23vw, 1.0625rem);
+  --text-lede: clamp(1.0625rem, 1rem + 0.32vw, 1.25rem);
+  --text-h3: clamp(1.125rem, 1.04rem + 0.42vw, 1.375rem);
+  --text-h2: clamp(1.375rem, 1.24rem + 0.66vw, 1.75rem);
+
+  /* --- elevation MEANS something --- */
+  --shadow-e1: 0 1px 2px rgb(0 0 0 / 0.5);
+  --shadow-e2: 0 10px 30px -12px rgb(0 0 0 / 0.75);
+  --shadow-e3: 0 28px 70px -20px rgb(0 0 0 / 0.85);
+
+  --size-hit: 44px;
+  --header-h: 3.75rem;
+
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+
+  --animate-shimmer: shimmer 1.6s linear infinite;
+  --animate-rise: rise 0.22s cubic-bezier(0.2, 0.9, 0.3, 1);
 }
 
-html,
-body {
-  background: #030712; /* gray-950 */
-  color: #f3f4f6; /* gray-100 */
+@keyframes shimmer {
+  to {
+    background-position: 200% 0;
+  }
 }
-
-/* Reusable bits (mirror the old styles.css vocabulary) */
-.panel {
-  background: rgba(30, 41, 59, 0.85); /* slate-800/85 — lifted for contrast */
-  border: 1px solid #374151; /* gray-700 — brighter edge */
-  border-radius: 0.75rem;
-  padding: 1rem;
-  box-shadow: 0 0 28px rgba(139, 92, 246, 0.1); /* dull violet glow */
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
 }
-
-.panel-title {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-size: 0.8rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: #ddd6fe; /* violet-200 — brighter accent */
-  margin-bottom: 0.75rem;
-}
-
-.gradient-text {
-  background: linear-gradient(90deg, #c084fc, #818cf8);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-}
-
-.prompt-textarea {
-  width: 100%;
-  min-height: 130px;
-  resize: vertical;
-  background: #111827; /* gray-900 */
-  border: 1px solid #374151; /* gray-700 */
-  border-radius: 0.6rem;
-  padding: 0.7rem 0.85rem;
-  font-size: 0.875rem;
-  line-height: 1.5;
-  color: #f3f4f6;
-}
-
-.prompt-textarea:focus {
-  outline: none;
-  border-color: #8b5cf6; /* violet-500 */
-  box-shadow: 0 0 0 1px #8b5cf6;
-}
-
-.input {
-  background: #111827;
-  border: 1px solid #374151;
-  border-radius: 0.6rem;
-  padding: 0.55rem 0.75rem;
-  font-size: 0.85rem;
-  color: #f3f4f6;
-  width: 100%;
-}
-
-.input:focus {
-  outline: none;
-  border-color: #8b5cf6;
-}
-
-.btn-primary-sm {
-  background: #7c3aed; /* violet-600 */
-  color: #fff;
-  border-radius: 0.55rem;
-  padding: 0.5rem 0.9rem;
-  font-size: 0.8rem;
-  font-weight: 600;
-}
-
-.btn-primary-sm:hover {
-  background: #6d28d9; /* violet-700 */
-}
-
-.btn-primary-sm:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-
-.btn-secondary {
-  background: #1f2937; /* gray-800 */
-  border: 1px solid #374151;
-  color: #e5e7eb;
-  border-radius: 0.55rem;
-  padding: 0.5rem 0.9rem;
-  font-size: 0.8rem;
-}
-
-.generate-btn {
-  width: 100%;
-  background: linear-gradient(90deg, #7c3aed, #4f46e5);
-  color: #fff;
-  font-weight: 700;
-  border-radius: 0.75rem;
-  padding: 0.9rem;
-  font-size: 1rem;
-}
-
-.generate-btn:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-
-.spinner {
-  width: 1rem;
-  height: 1rem;
-  border-radius: 9999px;
-  border: 2px solid rgba(255, 255, 255, 0.25);
-  border-top-color: #fff;
-  animation: spin 0.8s linear infinite;
-  display: inline-block;
-}
-
 @keyframes spin {
   to {
     transform: rotate(360deg);
   }
 }
 
-/* Tooltip bulleted lists: hanging indent so wrapped lines tuck under the text. */
-.tip-intro {
-  margin: 0 0 0.35rem;
+/* ============================================================
+   Base
+   ============================================================ */
+
+html {
+  -webkit-text-size-adjust: 100%;
+  color-scheme: dark;
 }
 
-.tip-list {
-  list-style: disc outside;
+body {
   margin: 0;
-  padding-left: 1.1rem;
-  display: grid;
-  gap: 0.3rem;
+  background: var(--color-s0);
+  color: var(--color-t2);
+  font-family: var(--font-sans);
+  font-size: var(--text-body);
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+  overscroll-behavior-y: none;
 }
 
-.tip-list li {
-  padding-left: 0.15rem;
+:focus-visible {
+  outline: 2px solid var(--color-info);
+  outline-offset: 2px;
+  border-radius: 4px;
 }
 
-/* Desktop readability: scale rem-based type/spacing up a notch and enlarge the
-   px-based microcopy that Tailwind's rem scale can't reach. */
-@media (min-width: 1024px) {
-  html {
-    font-size: 17px;
+::selection {
+  background: var(--color-accent);
+  color: #fff;
+}
+
+.scroll-y {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-line2) transparent;
+}
+.scroll-y::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+.scroll-y::-webkit-scrollbar-thumb {
+  background: var(--color-line2);
+  border-radius: 99px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+.scroll-y::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* ============================================================
+   Component layer — one definition per role. No !important
+   anywhere in the app because the base sizes are correct.
+   ============================================================ */
+
+@layer components {
+  /* ---- hit-area expander: keeps dense rows dense for mice,
+          while guaranteeing the 44px touch floor ------------- */
+  .hit {
+    position: relative;
   }
-  .text-\[9px\] {
-    font-size: 10px;
+  .hit::after {
+    content: "";
+    position: absolute;
+    inset: 50% 50%;
+    translate: -50% -50%;
+    min-width: var(--size-hit);
+    min-height: var(--size-hit);
   }
-  .text-\[10px\] {
-    font-size: 11.5px;
+
+  /* ---- buttons: 3 sizes x 4 tones, token driven ---------- */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    min-block-size: var(--size-hit);
+    padding-inline: 0.875rem;
+    border: 0;
+    border-radius: 0.625rem;
+    font-size: var(--text-fine);
+    font-weight: 600;
+    line-height: 1;
+    white-space: nowrap;
+    cursor: pointer;
+    transition:
+      background-color 0.15s ease,
+      box-shadow 0.15s ease,
+      color 0.15s ease;
   }
-  .text-\[11px\] {
-    font-size: 13px;
+  .btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  .btn-sm {
+    min-block-size: 2rem;
+    padding-inline: 0.625rem;
+    font-size: var(--text-micro);
+    border-radius: 0.5rem;
+  }
+  .btn-lg {
+    min-block-size: 3.25rem;
+    inline-size: 100%;
+    font-size: var(--text-lede);
+    border-radius: 0.875rem;
+  }
+  .btn-icon {
+    inline-size: var(--size-hit);
+    min-block-size: var(--size-hit);
+    padding-inline: 0;
+  }
+
+  .btn-primary {
+    background: var(--color-accent);
+    color: #fff;
+    box-shadow: var(--shadow-e1);
+  }
+  .btn-primary:hover:not(:disabled) {
+    background: color-mix(in oklab, var(--color-accent) 84%, white);
+  }
+
+  .btn-hero {
+    background: linear-gradient(100deg, var(--color-accent), #4f46e5);
+    color: #fff;
+    box-shadow: var(--shadow-e2);
+  }
+  .btn-hero:hover:not(:disabled) {
+    filter: brightness(1.1);
+  }
+
+  .btn-ghost {
+    background: transparent;
+    color: var(--color-t2);
+    box-shadow: inset 0 0 0 1px var(--color-line2);
+  }
+  .btn-ghost:hover:not(:disabled) {
+    background: var(--color-s2);
+    color: var(--color-t1);
+  }
+
+  .btn-quiet {
+    background: transparent;
+    color: var(--color-t3);
+  }
+  .btn-quiet:hover:not(:disabled) {
+    background: var(--color-s2);
+    color: var(--color-t1);
+  }
+
+  .btn-danger {
+    background: color-mix(in oklab, var(--color-crit) 18%, transparent);
+    color: var(--color-crit);
+    box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--color-crit) 40%, transparent);
+  }
+  .btn-danger:hover:not(:disabled) {
+    background: color-mix(in oklab, var(--color-crit) 28%, transparent);
+  }
+
+  /* ---- fields: correct by default, never overridden ------ */
+  .field {
+    inline-size: 100%;
+    min-block-size: var(--size-hit);
+    padding: 0.625rem 0.75rem;
+    background: var(--color-s0);
+    color: var(--color-t1);
+    border: 0;
+    border-radius: 0.625rem;
+    box-shadow: inset 0 0 0 1px var(--color-line);
+    font-family: inherit;
+    font-size: var(--text-fine);
+    transition: box-shadow 0.15s ease;
+  }
+  .field::placeholder {
+    color: var(--color-t3);
+  }
+  .field:hover {
+    box-shadow: inset 0 0 0 1px var(--color-line2);
+  }
+  .field:focus {
+    outline: none;
+    box-shadow:
+      inset 0 0 0 1px var(--color-accent),
+      0 0 0 3px color-mix(in oklab, var(--color-accent) 25%, transparent);
+  }
+  select.field {
+    appearance: none;
+    background-image: linear-gradient(45deg, transparent 50%, var(--color-t3) 50%),
+      linear-gradient(135deg, var(--color-t3) 50%, transparent 50%);
+    background-position:
+      calc(100% - 17px) calc(50% + 2px),
+      calc(100% - 12px) calc(50% + 2px);
+    background-size:
+      5px 5px,
+      5px 5px;
+    background-repeat: no-repeat;
+    padding-inline-end: 2rem;
+  }
+
+  /* ---- the prompt editor: auto-grows, 16px+ so iOS will
+          not zoom on focus, no drag-handle dependency ------- */
+  .prompt-area {
+    inline-size: 100%;
+    field-sizing: content;
+    min-block-size: 7lh;
+    max-block-size: 42dvh;
+    padding: 0.875rem 1rem;
+    background: var(--color-s0);
+    color: var(--color-t1);
+    border: 0;
+    border-radius: 0.75rem;
+    box-shadow: inset 0 0 0 1px var(--color-line);
+    font-family: inherit;
+    font-size: max(16px, var(--text-body));
+    line-height: 1.6;
+    resize: none;
+  }
+  .prompt-area::placeholder {
+    color: var(--color-t3);
+  }
+  .prompt-area:focus {
+    outline: none;
+    box-shadow:
+      inset 0 0 0 1px var(--color-accent),
+      0 0 0 3px color-mix(in oklab, var(--color-accent) 22%, transparent);
+  }
+
+  /* ---- surfaces: elevation is reserved for hierarchy ----- */
+  .panel {
+    background: var(--color-s1);
+    border-radius: 0.875rem;
+    box-shadow: inset 0 0 0 1px var(--color-line);
+  }
+  .panel-primary {
+    background: var(--color-s2);
+    border-radius: 1rem;
+    box-shadow:
+      var(--shadow-e2),
+      inset 0 0 0 1px color-mix(in oklab, var(--color-accent) 36%, var(--color-line));
+  }
+  .panel-overlay {
+    background: var(--color-s2);
+    border-radius: 1rem;
+    box-shadow:
+      var(--shadow-e3),
+      inset 0 0 0 1px var(--color-line2);
+  }
+
+  .well {
+    background: var(--color-s0);
+    border-radius: 0.75rem;
+    box-shadow: inset 0 0 0 1px var(--color-line);
+  }
+
+  /* ---- rows in the virtualised catalog ------------------- */
+  .row {
+    display: flex;
+    align-items: center;
+    gap: 0.625rem;
+    inline-size: 100%;
+    padding-inline: 0.625rem;
+    border-radius: 0.625rem;
+    text-align: start;
+    cursor: pointer;
+    transition: background-color 0.1s ease;
+  }
+  .row:hover {
+    background: var(--color-s2);
+  }
+  .row[aria-selected="true"] {
+    background: color-mix(in oklab, var(--color-accent) 20%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--color-accent) 45%, transparent);
+  }
+  .row[data-active="true"] {
+    background: var(--color-s3);
+    box-shadow: inset 0 0 0 1px var(--color-line2);
+  }
+
+  .skeleton {
+    background: linear-gradient(
+      90deg,
+      var(--color-s1) 25%,
+      var(--color-s3) 50%,
+      var(--color-s1) 75%
+    );
+    background-size: 200% 100%;
+    animation: var(--animate-shimmer);
+  }
+}
+
+@layer utilities {
+  .tnum {
+    font-variant-numeric: tabular-nums;
+  }
+  .dock-pad {
+    padding-bottom: calc(0.75rem + env(safe-area-inset-bottom));
+  }
+  .safe-b {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}
+
+/* Native popover resets — top layer, light dismiss, no UA chrome */
+[popover] {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  overflow: visible;
+}
+[popover]::backdrop {
+  background: transparent;
+}
+
+dialog::backdrop {
+  background: rgb(4 6 10 / 0.72);
+  backdrop-filter: blur(6px);
+}
+
+@media (pointer: coarse) {
+  .row {
+    min-block-size: 56px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

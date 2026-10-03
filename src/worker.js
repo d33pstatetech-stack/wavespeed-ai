@@ -1110,7 +1110,13 @@ async function handleApiRoute(request, env, path, ctx) {
       ).bind(...vals, limit).all();
       const stats = (results || []).map((r) => ({ model: r.model, runs: r.runs, avg_rating: r.avg_rating }));
       return jsonResponse({ models: stats, total: stats.length });
-    } catch (e) { return jsonResponse({ error: e.message }, 500); }
+    } catch (e) {
+      // A local dev HISTORY database has no `runs` table (production D1 cannot
+      // be cloned locally). That is an empty result set, not a failure: the UI
+      // hides run counts and ratings and says why.
+      if (/no such table/i.test(String(e && e.message))) return jsonResponse({ models: [], total: 0 });
+      return jsonResponse({ error: e.message }, 500);
+    }
   }
 
   // ─── GET /api/health ───
