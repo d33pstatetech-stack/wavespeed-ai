@@ -16,6 +16,8 @@ import {
   fetchCustomLoras as apiCustomLoras,
   saveCustomLora as apiSaveCustomLora,
   deleteCustomLora as apiDeleteCustomLora,
+  fetchLibrary as apiLibrary,
+  fetchVerifications as apiVerifications,
 } from '../api';
 import { applySchema, toModel } from './models';
 import type { Lora, Model, ModelSchema } from './types';
@@ -151,6 +153,27 @@ export async function fetchCustomLoras(): Promise<any[]> {
     return await apiCustomLoras();
   } catch {
     return [];
+  }
+}
+
+/* Central LoRA repository (Phase A read-only). Fail-soft to null so callers
+   can tell "unreachable/old worker" apart from "reachable but empty" ([]) —
+   only a non-empty array replaces the baked seed. */
+export async function fetchLibrary(): Promise<any[] | null> {
+  try {
+    return await apiLibrary();
+  } catch {
+    return null;
+  }
+}
+
+/* Run-confirmed LoRA ↔ model pairs. Fail-soft to null; only a non-empty
+   array overrides the baked CONFIRMED/VERIFIED lists. */
+export async function fetchVerifications(): Promise<any[] | null> {
+  try {
+    return await apiVerifications();
+  } catch {
+    return null;
   }
 }
 

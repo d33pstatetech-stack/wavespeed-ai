@@ -728,6 +728,42 @@ async function handleApiRoute(request, env, path, ctx) {
     }
   }
 
+  // ─── GET /api/loras/library — central LoRA repository (shared HISTORY table) ───
+  // Phase A read-only. Pre-migration DBs without the table get {loras:[]} (200, never 500).
+  if (path === '/api/loras/library' && request.method === 'GET') {
+    const hdb = histDB(env);
+    if (!hdb) return jsonResponse({ error: 'history DB not bound' }, 500);
+    try {
+      const rows = await hdb.prepare('SELECT * FROM lora_library ORDER BY id ASC').all();
+      const loras = (rows.results || []).map((row) => {
+        let triggers = [];
+        try {
+          const t = JSON.parse(row.triggers_json || '[]');
+          if (Array.isArray(t)) triggers = t;
+        } catch { /* keep [] */ }
+        return { ...row, triggers };
+      });
+      return jsonResponse({ loras });
+    } catch (e) {
+      if (/no such table/i.test(String((e && e.message) || e))) return jsonResponse({ loras: [] });
+      throw e;
+    }
+  }
+
+  // ─── GET /api/loras/verifications — run-confirmed LoRA ↔ model pairs ───
+  // Phase A read-only. Pre-migration DBs without the table get {verifications:[]} (200, never 500).
+  if (path === '/api/loras/verifications' && request.method === 'GET') {
+    const hdb = histDB(env);
+    if (!hdb) return jsonResponse({ error: 'history DB not bound' }, 500);
+    try {
+      const rows = await hdb.prepare('SELECT lora_id, model_id, app, job_id, ran_at FROM lora_verifications ORDER BY lora_id ASC, model_id ASC, app ASC').all();
+      return jsonResponse({ verifications: rows.results || [] });
+    } catch (e) {
+      if (/no such table/i.test(String((e && e.message) || e))) return jsonResponse({ verifications: [] });
+      throw e;
+    }
+  }
+
   // ─── POST /api/enhance + /api/optimize ─── (streaming, uncensored, fail-fast, single try per provider)
   if ((path === '/api/enhance' || path === '/api/optimize') && request.method === 'POST') {
     let body;

@@ -295,6 +295,24 @@ export async function deleteCustomLora(id) {
   return data;
 }
 
+// Central LoRA repository (read-only Phase A). Returns the raw rows; callers
+// in lib/api.js wrap fail-soft. Pre-migration DBs get {loras:[]} (200).
+export async function fetchLibrary() {
+  const res = await fetch(`${API}/api/loras/library`);
+  const data = await json(res);
+  if (!res.ok) throw new Error(errText(data.error, `Library failed (${res.status})`));
+  return Array.isArray(data.loras) ? data.loras : [];
+}
+
+// Run-confirmed LoRA ↔ model pairs. Returns raw rows
+// [{lora_id, model_id, app, job_id, ran_at}].
+export async function fetchVerifications() {
+  const res = await fetch(`${API}/api/loras/verifications`);
+  const data = await json(res);
+  if (!res.ok) throw new Error(errText(data.error, `Verifications failed (${res.status})`));
+  return Array.isArray(data.verifications) ? data.verifications : [];
+}
+
 // Jev structured-judgment pilot: verifier gate for enhancements (log-only).
 export const APP_NAME = 'wavespeed';
 

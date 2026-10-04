@@ -7,6 +7,18 @@
 //     version gap (wan 2.x vs 3.x). Hidden unless the picker’s show-all is on.
 import { VERIFIED_LORA_RUNS } from './loras-data.js';
 
+// Central override (Phase A). App sets this from GET /api/loras/verifications
+// (filtered to app==='wavespeed', mapped to {lora, model, job, when}). When
+// non-empty the verified tier reads it FIRST; when absent/empty the baked
+// VERIFIED_LORA_RUNS is used unchanged, so behaviour is identical offline.
+let centralVerified = null;
+export function setCentralVerified(rows) {
+  centralVerified = Array.isArray(rows) && rows.length ? rows : null;
+}
+export function getCentralVerified() {
+  return centralVerified;
+}
+
 export function loraFamily(l) {
   const b = String(l?.base_model || '');
   if (/flux/i.test(b)) return 'FLUX.1';
@@ -64,7 +76,8 @@ export function filterLoras(list, model, modelId) {
 export function compatibility(lora, model, modelId) {
   if (!lora) return 'no';
   const lid = String(lora.id || '');
-  if (modelId && (VERIFIED_LORA_RUNS || []).some((v) => v.lora === lid && v.model === modelId)) {
+  const verifiedTable = (centralVerified && centralVerified.length ? centralVerified : VERIFIED_LORA_RUNS) || [];
+  if (modelId && verifiedTable.some((v) => v.lora === lid && v.model === modelId)) {
     return 'verified';
   }
   // Curated exact target always trusted (ranked likely until a run verifies it).

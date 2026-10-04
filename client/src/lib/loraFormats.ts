@@ -110,6 +110,22 @@ function appName(app: App) {
    this, so a green tick always means "this exact pair produced an image",
    never "these two probably go together".
    ------------------------------------------------------------------ */
+/* ------------------------------------------------------------------
+   Central override (Phase A). App sets this from GET /api/loras/verifications
+   (filtered to app==='wavespeed' and grouped by model). When non-empty it is
+   read FIRST; when absent/empty the baked table below is used unchanged, so
+   behaviour is identical offline or against an old DB.
+   ------------------------------------------------------------------ */
+let centralConfirmed: { model: string; loras: string[]; apps: App[] }[] | null = null;
+
+export function setCentralConfirmed(rows: { model: string; loras: string[]; apps: App[] }[] | null): void {
+  centralConfirmed = Array.isArray(rows) && rows.length ? rows : null;
+}
+
+export function getCentralConfirmed(): { model: string; loras: string[]; apps: App[] }[] | null {
+  return centralConfirmed;
+}
+
 export const CONFIRMED_LORA_RUNS: { model: string; loras: string[]; apps: App[] }[] = [
   {
     model: 'qwen-image-text-to-image-2512-lora',
@@ -185,7 +201,8 @@ export const CONFIRMED_LORA_RUNS: { model: string; loras: string[]; apps: App[] 
 /** True when this exact model + LoRA pair has produced a real image. */
 export function isConfirmed(app: App, modelId: string | null | undefined, loraId: string): boolean {
   if (!modelId) return false;
-  for (const row of CONFIRMED_LORA_RUNS) {
+  const table = centralConfirmed && centralConfirmed.length ? centralConfirmed : CONFIRMED_LORA_RUNS;
+  for (const row of table) {
     if (row.model !== modelId) continue;
     if (!row.apps.includes(app)) continue;
     if (row.loras.includes(loraId)) return true;

@@ -11,8 +11,10 @@ import {
   deleteCustomLora as apiDeleteCustom,
   estimateCost,
   fetchCustomLoras,
+  fetchLibrary,
   fetchModels,
   fetchSchema,
+  fetchVerifications,
   runGeneration,
   saveCustomLora,
   toLora,
@@ -20,7 +22,8 @@ import {
 } from "./lib/api";
 import { tierFor } from "./lib/tiers";
 import type { App } from "./lib/loraFormats";
-import { insertFormat } from "./lib/loraFormats";
+import { insertFormat, setCentralConfirmed } from "./lib/loraFormats";
+import { setCentralVerified } from "./lora-compat";
 import { useMediaQuery, usePersistentState } from "./lib/hooks";
 import { USER_LORAS, NSFW_LORAS, isAzntenLora } from "./loras-data";
 import { buildSubmitParams } from "./params";
@@ -49,6 +52,44 @@ const APP_ID: App = 'wavespeed';
    unchanged. */
 function tagCustomEntry(entry: any) {
   return { ...entry, isAznten: isAzntenLora(entry), isNsfw: !!entry?.nsfw };
+}
+
+/* Central row → seed-entry shape. isAznten comes from group_name (never the
+   regex); isNsfw from nsfw. baseFamily mirrors base_family because toLora
+   reads the camelCase key. Customs keep the regex path above. */
+function centralEntryForRow(row: any) {
+  let triggers: any[] = [];
+  if (Array.isArray(row?.triggers)) triggers = row.triggers;
+  else {
+    try {
+      const t = JSON.parse(row?.triggers_json || "[]");
+      if (Array.isArray(t)) triggers = t;
+    } catch {
+      triggers = [];
+    }
+  }
+  return {
+    id: String(row?.id ?? row?.repo ?? ""),
+    name: String(row?.name ?? row?.id ?? ""),
+    source: String(row?.source ?? ""),
+    repo: String(row?.repo ?? row?.id ?? ""),
+    repo_url: String(row?.repo_url ?? ""),
+    file: String(row?.file ?? ""),
+    file_url: String(row?.file_url ?? ""),
+    base_model: String(row?.base_model ?? ""),
+    base_family: String(row?.base_family ?? ""),
+    baseFamily: String(row?.base_family ?? ""),
+    pipeline: String(row?.pipeline ?? "text-to-image"),
+    triggers,
+    isNsfw: !!row?.nsfw,
+    isAznten: row?.group_name === "aznten",
+    note: String(row?.note ?? ""),
+    suggested_target: String(row?.suggested_target ?? ""),
+    muapi_model: String(row?.muapi_model ?? ""),
+    replicate_model: String(row?.replicate_model ?? ""),
+    wavespeed_model: String(row?.wavespeed_model ?? ""),
+    custom: false,
+  };
 }
 
 /* Ad-hoc LoRA (this run only, never saved): direct .safetensors URL, HF
@@ -124,6 +165,26 @@ function Console() {
     };
   }, [toast]);
 
+  /* ---------------- central LoRA library (Phase A read-only) ---------------- */
+  /* Replaces the baked seed ONLY when the fetch returns a non-empty array;
+     offline or pre-migration DBs keep the baked USER_LORAS/NSFW_LORAS. */
+  useEffect(() => {
+    let live = true;
+    fetchLibrary().then((rows) => {
+      if (!live) return;
+      if (!Array.isArray(rows) || !rows.length) return;
+      const central = rows.map((r: any) => toLora(centralEntryForRow(r)));
+      setLibrary((ls) => {
+        const customs = ls.filter((l) => l.custom);
+        const customIds = new Set(customs.map((c) => c.id));
+        return [...central.filter((l) => !customIds.has(l.id)), ...customs];
+      });
+    });
+    return () => {
+      live = false;
+    };
+  }, []);
+
   /* ---------------- server-stored custom LoRAs ---------------- */
   useEffect(() => {
     let live = true;
@@ -133,6 +194,33 @@ function Console() {
         const have = new Set(ls.map((l) => l.id));
         return [...ls, ...rows.filter((r: any) => !have.has(String(r.id))).map((r: any) => toLora(tagCustomEntry(r), true))];
       });
+    });
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  /* ---------------- central verifications → confirmed/verified ---------------- */
+  /* Builds the confirmed/verified lookup from central verifications
+     (lora_id+model_id+app==='wavespeed') FIRST; when central is empty the
+     baked CONFIRMED_LORA_RUNS/VERIFIED_LORA_RUNS stay in force (the setters
+     are no-ops for empty input). No format/compat logic changes. */
+  useEffect(() => {
+    let live = true;
+    fetchVerifications().then((rows) => {
+      if (!live) return;
+      if (!Array.isArray(rows) || !rows.length) return;
+      const ws = rows.filter((v: any) => v && v.app === "wavespeed" && v.lora_id && v.model_id);
+      if (!ws.length) return;
+      const byModel = new Map<string, string[]>();
+      for (const v of ws) {
+        const m = String(v.model_id);
+        const l = String(v.lora_id);
+        if (!byModel.has(m)) byModel.set(m, []);
+        if (!byModel.get(m)!.includes(l)) byModel.get(m)!.push(l);
+      }
+      setCentralConfirmed([...byModel].map(([model, loras]) => ({ model, loras, apps: ["wavespeed" as const] })));
+      setCentralVerified(ws.map((v: any) => ({ lora: String(v.lora_id), model: String(v.model_id), job: String(v.job_id ?? ""), when: String(v.ran_at ?? "") })));
     });
     return () => {
       live = false;
