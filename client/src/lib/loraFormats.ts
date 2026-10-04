@@ -162,6 +162,8 @@ export const CONFIRMED_LORA_RUNS: { model: string; loras: string[]; apps: App[] 
     apps: ['replicate'],
     loras: [
       'jasbloom/Wan2.1-I2V-14B-720P-Diffusers-mmxxii-rank256-lora',
+      'D33pStateTech/asian-ten-wan21-lora',
+      'https://huggingface.co/D33pStateTech/asian-ten-wan21-lora/resolve/main/asian_ten_wan21.safetensors',
     ],
   },
   {
