@@ -119,7 +119,6 @@ export const CONFIRMED_LORA_RUNS: { model: string; loras: string[]; apps: App[] 
       'gokaygokay/Krea-2-Realism-LoRA',
       'D33pStateTech/d33pstateten',
       'D33pStateTech/d33pstateLora',
-      'D33pStateTech/asian-ten-wan21-lora',
       'Wuli-art/Qwen-Image-2512-Turbo-LoRA',
       'civitai:2877049',
     ],
