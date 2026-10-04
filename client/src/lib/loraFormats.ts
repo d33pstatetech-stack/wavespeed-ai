@@ -120,13 +120,14 @@ export const CONFIRMED_LORA_RUNS: { model: string; loras: string[]; apps: App[] 
       'D33pStateTech/d33pstateten',
       'D33pStateTech/d33pstateLora',
       'D33pStateTech/asian-ten-wan21-lora',
+      'Wuli-art/Qwen-Image-2512-Turbo-LoRA',
       'civitai:2877049',
     ],
   },
   {
     model: 'krea-v2-turbo-lora',
     apps: ['muapi'],
-    loras: ['civitai:2877049'],
+    loras: ['civitai:2877049', 'lvladikov/Krea2-Turbo-Distill-4step-LoRA'],
   },
   {
     model: 'wavespeed-ai/krea-v2/turbo-lora',
@@ -136,6 +137,7 @@ export const CONFIRMED_LORA_RUNS: { model: string; loras: string[]; apps: App[] 
       'gokaygokay/Krea-2-Realism-LoRA',
       'D33pStateTech/d33pstateten',
       'D33pStateTech/d33pstateLora',
+      'lvladikov/Krea2-Turbo-Distill-4step-LoRA',
     ],
   },
   {
@@ -144,6 +146,37 @@ export const CONFIRMED_LORA_RUNS: { model: string; loras: string[]; apps: App[] 
     loras: [
       'Norod78/Flux_1_Dev_LoRA_Paper-Cutout-Style',
       'https://huggingface.co/Norod78/Flux_1_Dev_LoRA_Paper-Cutout-Style/resolve/main/Flux_1_Dev_LoRA_Paper-Cutout-Style.safetensors',
+      'D33pStateTech/aznten-flux-schnell-mimicpc',
+      'https://huggingface.co/D33pStateTech/aznten-flux-schnell-mimicpc/resolve/main/aznten-flux-schnell-mimicpc.safetensors',
+    ],
+  },
+  {
+    model: 'qwen/qwen-image',
+    apps: ['replicate'],
+    loras: [
+      'Wuli-art/Qwen-Image-2512-Turbo-LoRA',
+      'https://huggingface.co/Wuli-art/Qwen-Image-2512-Turbo-LoRA/resolve/main/Wuli-Qwen-Image-2512-Turbo-LoRA-4steps-V3.0-bf16.safetensors',
+    ],
+  },
+  {
+    model: 'wan-video/wan2.1-with-lora',
+    apps: ['replicate'],
+    loras: [
+      'jasbloom/Wan2.1-I2V-14B-720P-Diffusers-mmxxii-rank256-lora',
+    ],
+  },
+  {
+    model: 'wavespeed-ai/qwen-image/text-to-image-2512-lora',
+    apps: ['wavespeed'],
+    loras: [
+      'Wuli-art/Qwen-Image-2512-Turbo-LoRA',
+    ],
+  },
+  {
+    model: 'wavespeed-ai/flux-schnell-lora',
+    apps: ['wavespeed'],
+    loras: [
+      'D33pStateTech/aznten-flux-schnell-mimicpc',
     ],
   },
 ];
