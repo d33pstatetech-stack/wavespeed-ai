@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import Icon from "../ui/Icon";
-import { Badge, Dialog, EmptyState, Spinner } from "../ui/primitives";
+import { Badge, Dialog, EmptyState, ModelName, Spinner } from "../ui/primitives";
 import { useToast } from "../ui/Toasts";
 import { useElapsed } from "../lib/hooks";
 import type { Job, Model, Run } from "../lib/types";
@@ -92,9 +92,10 @@ export default function ResultsPane({
                   className={job.status === "done" ? "text-pass" : "text-crit"}
                 />
               )}
-              <span className="min-w-0 flex-1 truncate text-fine font-medium text-t1">
-                {byId.get(job.modelId)?.name ?? job.modelId}
-              </span>
+              <ModelName
+                name={byId.get(job.modelId)?.name ?? job.modelId}
+                className="min-w-0 flex-1 text-fine font-medium text-t1"
+              />
               <span className="tnum shrink-0 text-micro text-t3">
                 {job.status === "running" ? fmt(elapsed) : fmt(job.elapsedMs)}
               </span>

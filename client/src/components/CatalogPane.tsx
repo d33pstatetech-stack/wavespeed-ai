@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import Icon from "../ui/Icon";
-import { Badge, EmptyState, Segmented, TierBadge } from "../ui/primitives";
+import { Badge, EmptyState, ModelName, Segmented, TierBadge } from "../ui/primitives";
 import { useDebounced, useVirtualRows } from "../lib/hooks";
 import { tierFor } from "../lib/tiers";
 import type { Group, Lora, Model } from "../lib/types";
@@ -241,9 +241,7 @@ export default function CatalogPane({
                 >
                   <div className="flex items-center gap-2">
                     {pinning && tier && <TierBadge tier={tier} compact />}
-                    <span className="min-w-0 flex-1 truncate text-fine font-medium text-t1">
-                      {m.name}
-                    </span>
+                    <ModelName name={m.name} className="min-w-0 flex-1 text-fine font-medium text-t1" />
                     <span className="tnum shrink-0 text-micro font-semibold text-t2">
                       {m.cost > 0 ? `$${m.cost.toFixed(3)}` : "Free"}
                       {m.dynamicPricing && <span aria-hidden="true">*</span>}

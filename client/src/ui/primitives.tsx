@@ -28,6 +28,30 @@ export function TierBadge({ tier, compact = false }: { tier: Tier; compact?: boo
   );
 }
 
+/* ------------------------------------------------------------------
+   ModelName — a model id like "wavespeed-ai/z-image/base-lora" has to
+   survive a narrow column without losing the part that identifies the
+   model. A plain `truncate` clips the tail, which is exactly the part
+   that matters, so split on the last "/" and keep the final segment
+   untruncated; only the owner/repo prefix gives way. No `title`
+   attribute — invisible on touch (see TierBadge note above).
+   ------------------------------------------------------------------ */
+export function ModelName({ name, className = "" }: { name: string; className?: string }) {
+  const cut = name.lastIndexOf("/");
+  const tail = cut === -1 ? "" : name.slice(cut + 1);
+  const head = cut === -1 ? name : name.slice(0, cut);
+  if (!tail) {
+    // No path separator: nothing to protect, truncate as normal.
+    return <span className={`truncate ${className}`}>{name}</span>;
+  }
+  return (
+    <span className={`flex min-w-0 items-baseline ${className}`}>
+      <span className="min-w-0 flex-1 truncate text-right">{head}</span>
+      <span className="shrink-0">/{tail}</span>
+    </span>
+  );
+}
+
 export function Badge({
   children,
   tone = "neutral",

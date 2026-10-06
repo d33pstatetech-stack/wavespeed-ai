@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Icon from "../ui/Icon";
-import { Badge, Spinner, Tip } from "../ui/primitives";
+import { Badge, ModelName, Spinner, Tip } from "../ui/primitives";
 import { useToast } from "../ui/Toasts";
 import ParamForm from "./ParamForm";
 import { estimateCost, streamEnhance } from "../lib/api";
@@ -142,7 +142,7 @@ export default function Composer({
               />
             </span>
             <div className="min-w-0 flex-1">
-              <p className="truncate text-fine font-semibold text-t1">{model.name}</p>
+              <ModelName name={model.name} className="block text-fine font-semibold text-t1" />
               <p className="truncate text-micro text-t3">
                 {model.category}
                 {model.family ? ` · ${model.family}` : ""}
