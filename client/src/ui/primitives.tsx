@@ -29,24 +29,57 @@ export function TierBadge({ tier, compact = false }: { tier: Tier; compact?: boo
 }
 
 /* ------------------------------------------------------------------
-   ModelName — a model id like "wavespeed-ai/z-image/base-lora" has to
-   survive a narrow column without losing the part that identifies the
-   model. A plain `truncate` clips the tail, which is exactly the part
-   that matters, so split on the last "/" and keep the final segment
-   untruncated; only the owner/repo prefix gives way. No `title`
-   attribute — invisible on touch (see TierBadge note above).
+   ModelName — provider ids are `owner/repo/variant`, e.g.
+   "wavespeed-ai/flux-2-klein-base-9b/text-to-image-lora". A narrow
+   catalogue row has to survive that without losing the part that
+   identifies the model.
+
+   Two things are dropped or given way, in this order:
+
+   1. The owner's own namespace is redundant. 432 of 765 WaveSpeed rows
+      are `wavespeed-ai/…` — platform re-uploads — and the surrounding
+      UI already says WaveSpeed. Other owners (bytedance, google, …)
+      carry real information and are kept.
+   2. The *repo* segment is what identifies the model, and the final
+      segment is the variant, so both are protected; the owner is the
+      only part allowed to truncate.
+
+   Note on CSS: `truncate` is left-anchored — it clips characters off the
+   END and appends the ellipsis. `text-right` only re-aligns the visible
+   fragment inside the already-clipped box, it cannot change *which*
+   characters survive. So the protected segments must be separate
+   shrink-0 siblings, not one span relying on alignment.
+
+   No `title` attribute — invisible on touch (see TierBadge note above).
    ------------------------------------------------------------------ */
+const SELF_NAMESPACE = /^wavespeed-ai\//;
+
 export function ModelName({ name, className = "" }: { name: string; className?: string }) {
-  const cut = name.lastIndexOf("/");
-  const tail = cut === -1 ? "" : name.slice(cut + 1);
-  const head = cut === -1 ? name : name.slice(0, cut);
-  if (!tail) {
-    // No path separator: nothing to protect, truncate as normal.
-    return <span className={`truncate ${className}`}>{name}</span>;
+  const display = name.replace(SELF_NAMESPACE, "");
+  const cut = display.lastIndexOf("/");
+  if (cut === -1) {
+    // Single segment after stripping: nothing to protect, truncate normally.
+    return <span className={`truncate ${className}`}>{display}</span>;
   }
+  const tail = display.slice(cut + 1);
+  const head = display.slice(0, cut);
+  const ownerCut = head.indexOf("/");
+  if (ownerCut === -1) {
+    // owner/variant — both meaningful, tail still protected.
+    return (
+      <span className={`flex min-w-0 items-baseline ${className}`}>
+        <span className="min-w-0 flex-1 truncate">{head}</span>
+        <span className="shrink-0">/{tail}</span>
+      </span>
+    );
+  }
+  const owner = head.slice(0, ownerCut);
+  const repo = head.slice(ownerCut + 1);
   return (
     <span className={`flex min-w-0 items-baseline ${className}`}>
-      <span className="min-w-0 flex-1 truncate text-right">{head}</span>
+      {/* Owner gives way first, and can vanish entirely — that is the point. */}
+      <span className="min-w-0 shrink truncate text-t3">{owner}</span>
+      <span className="min-w-0 flex-1 truncate text-right">{repo}</span>
       <span className="shrink-0">/{tail}</span>
     </span>
   );
