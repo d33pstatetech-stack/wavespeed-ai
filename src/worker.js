@@ -145,7 +145,7 @@ function buildEnhancerSystemPrompt(raw, ctx) {
   // Prompt Atlas guide (Phase 1). Authoritative per-model conventions from the
   // shared D1. When a guide matches it supersedes MODEL_PRESETS, so the two
   // never contradict each other in the same prompt.
-  const guide = ctx.guideBlock;
+  const guideBlock = ctx.guideBlock;
   if (guide) t += `\n\nModel-specific conventions (verified documentation for this exact model â€” follow them):\n${guide}`;
   let preset = MODEL_PRESETS.default;
   if (!guide) {
@@ -172,27 +172,35 @@ function buildEnhancerSystemPrompt(raw, ctx) {
    seeds.
    ------------------------------------------------------------------ */
 const _guideCache = new Map();
-async function getPromptGuideBlock(env, model) {
+async function getPromptGuide(env, model) {
+  // Rollback switch: set the GUIDE_INJECTION Worker var to "0" to disable
+  // guide injection without a code change. See docs/prompt-atlas-rollback.md.
+  // Defaults to on when unset.
+  if (env.GUIDE_INJECTION === '0' || env.GUIDE_INJECTION === 'false') return null;
   if (!env.HISTORY || !model) return null;
   const cacheKey = String(model.id);
   if (_guideCache.has(cacheKey)) return _guideCache.get(cacheKey);
-  let block = null;
+  let guide = null;
   try {
     const { resolveGuideKey } = await import('./prompt-guides.mjs');
-    const key = resolveGuideKey(model.id, model.family || '');
+    const modality = model.group_of === 'video' ? 'video' : 'image';
+    // modality is passed to the resolver so a video guide is never looked up
+    // for an image model (e.g. an image-group Wan model): that key does not
+    // exist and the lookup would silently resolve to nothing.
+    const key = resolveGuideKey(model.id, model.family || '', modality);
     if (key) {
-      const modality = model.group_of === 'video' ? 'video' : 'image';
+      const guideKey = `${modality}/${key}`;
       const row = await env.HISTORY
         .prepare('SELECT enhancer_md FROM prompt_guides WHERE guide_key = ?')
-        .bind(`${modality}/${key}`)
+        .bind(guideKey)
         .first();
-      if (row && row.enhancer_md) block = row.enhancer_md;
+      if (row && row.enhancer_md) guide = { guideKey, block: row.enhancer_md };
     }
   } catch {
-    block = null;
+    guide = null; // table absent, or a transient D1 error â€” fall back cleanly
   }
-  _guideCache.set(cacheKey, block);
-  return block;
+  _guideCache.set(cacheKey, guide);
+  return guide;
 }
 async function getLLMConfigWorker(env) {
   // 1. D1 persisted config (masked keys are "***")
@@ -269,7 +277,7 @@ async function histInsertEnhancement(env, row) {
     try {
       const r = await H.prepare(
         'INSERT INTO enhancements (source_app, kind, raw_prompt, enhanced_prompt, target_provider, target_model, params_json, loras_json, llm_provider, llm_model, template_version, retrieval_refs_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-      ).bind(row.source_app, row.kind, row.raw_prompt, row.enhanced, row.target_provider || '', row.target_model, paramsJson, lorasJson, row.llm_provider || '', row.llm_model || '', 'v0-preset', '[]').run();
+      ).bind(row.source_app, row.kind, row.raw_prompt, row.enhanced, row.target_provider || '', row.target_model, paramsJson, lorasJson, row.llm_provider || '', row.llm_model || '', row.guide_key ? 'atlas:' + row.guide_key : 'v0-preset', truncJson(row.retrieval_refs || [])).run();
       return (r && r.meta && r.meta.last_row_id) || null;
     } catch (e) { console.error('HISTORY enhancement insert failed, legacy fallback', e); }
   }
@@ -826,8 +834,8 @@ async function handleApiRoute(request, env, path, ctx) {
     const resolution = userParams.resolution || (userParams.width && userParams.height ? `${userParams.width}x${userParams.height}` : null) || null;
     const duration = userParams.duration || null;
     const hasAudio = !!(model.id.includes('seedance') || model.id.includes('wan') || model.family === 'seedance' || model.group_of === 'audio' || (model.id.includes('audio')));
-    const guideBlock = await getPromptGuideBlock(env, model);
-    const ctx = { model: model.id, mediaType, aspectRatio, resolution, duration, hasAudio, guideBlock };
+    const guide = await getPromptGuide(env, model);
+    const ctx = { model: model.id, mediaType, aspectRatio, resolution, duration, hasAudio, guideBlock: guide && guide.block };
     const systemPrompt = buildEnhancerSystemPrompt(rawPrompt, ctx);
 
     const llmCfg = await getLLMConfigWorker(env);
@@ -896,6 +904,8 @@ async function handleApiRoute(request, env, path, ctx) {
             source_app: 'wavespeed', kind: isOptimize ? 'optimized' : 'enhanced',
             raw_prompt: rawPrompt, enhanced: content, target_provider: 'wavespeed',
             target_model: model.id, params: userParams, llm_provider: baseUrl, llm_model: actualModel,
+                      guide_key: guide && guide.guideKey,
+                      retrieval_refs: guide ? [{ kind: 'prompt-atlas', guide_key: guide.guideKey }] : [],
           });
           return jsonResponse({ optimized_prompt: content, enhanced: content, techniques_applied: techniques, providerUsed: baseUrl, modelUsed: p.model, actualModel, history_id, ctx });
         } catch (e) {
@@ -935,6 +945,8 @@ async function handleApiRoute(request, env, path, ctx) {
                       source_app: 'wavespeed', kind: 'enhanced',
                       raw_prompt: rawPrompt, enhanced: fullEnhanced, target_provider: 'wavespeed',
                       target_model: model.id, params: userParams, llm_provider: baseUrl, llm_model: actualModel,
+                      guide_key: guide && guide.guideKey,
+                      retrieval_refs: guide ? [{ kind: 'prompt-atlas', guide_key: guide.guideKey }] : [],
                     });
                     if (hid) controller.enqueue(encoder.encode(`data: ${JSON.stringify({ history_id: hid })}\n\n`));
                   }

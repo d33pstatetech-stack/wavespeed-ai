@@ -24,6 +24,9 @@ binding = "OUTPUTS_BUCKET"
 bucket_name = "genai-assets"
 
 [vars]
+# Rollback switch for Prompt Atlas guide injection. Set to "0" to disable
+# without a code change — see docs/prompt-atlas-rollback.md.
+GUIDE_INJECTION = "1"
 WAVESPEED_BASE_URL = "https://api.wavespeed.ai/api/v3"
 # R2 presigned URLs for cloud file picker (worker fetches nothing; provider pulls directly).
 # Secrets R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY via `wrangler secret put`.
