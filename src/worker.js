@@ -146,9 +146,13 @@ function buildEnhancerSystemPrompt(raw, ctx) {
   // shared D1. When a guide matches it supersedes MODEL_PRESETS, so the two
   // never contradict each other in the same prompt.
   const guideBlock = ctx.guideBlock;
-  if (guide) t += `\n\nModel-specific conventions (verified documentation for this exact model â€” follow them):\n${guide}`;
-  let preset = MODEL_PRESETS.default;
-  if (!guide) {
+  if (guideBlock) t += `\n\nModel-specific conventions (verified documentation for this exact model — follow them):\n${guideBlock}`;
+  // A guide supersedes MODEL_PRESETS entirely, so the default must start as
+  // null here — seeding it with MODEL_PRESETS.default and then guarding only
+  // the overrides still appends the legacy preset to a guided prompt, giving
+  // the enhancer two contradictory sets of conventions at once.
+  let preset = guideBlock ? null : MODEL_PRESETS.default;
+  if (!guideBlock) {
     if (fam.includes('seedance')) preset = MODEL_PRESETS.seedance;
     else if (fam.includes('wan')) preset = MODEL_PRESETS.wan;
     else if (fam.includes('minimax') || fam.includes('hailuo')) preset = MODEL_PRESETS.minimax;
