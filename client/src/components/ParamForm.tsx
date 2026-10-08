@@ -2,8 +2,9 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import Icon from "../ui/Icon";
 import { Badge, Tip } from "../ui/primitives";
 import { uploadFileBlob } from "../api";
-import { getParamType, isLoraParam, loraSlotCount, loraTokenIssues, prettyLabel, sortParamEntries } from "../params";
+import { getParamType, isLoraParam, loraSlotCount, loraTokenIssues, prettyLabel, sortParamEntries, TIER_B_LORA_PARAM, tierBLoraPayload } from "../params";
 import type { ModelSchema, ParamSpec } from "../lib/types";
+import type { TierBLora } from "../lib/models";
 
 type Values = Record<string, unknown>;
 
@@ -298,14 +299,83 @@ function Field({ name, spec, value, onSet }: { name: string; spec: ParamSpec; va
   );
 }
 
+/* ------------------------------------------------------------------
+   Tier B — the UNVERIFIED adapter slot.
+
+   Rendered only for a model whose architecture is a candidate but whose own
+   schema declares no adapter param (see lib/models.ts). Off by default, and
+   the value only enters `values` while the box is ticked, so the request
+   payload can never carry an `extra_lora` the user did not explicitly ask for.
+   ------------------------------------------------------------------ */
+function TierBLoraField({
+  tierB,
+  optIn,
+  token,
+  onChange,
+}: {
+  tierB: TierBLora;
+  optIn: boolean;
+  token: string;
+  onChange: (next: { optIn: boolean; token: string }) => void;
+}) {
+  const id = useId();
+  const issue = optIn ? loraTokenIssues(token) : null;
+  return (
+    <div className="@container/form col-span-full rounded-xl bg-warn/5 p-3 ring-1 ring-warn/25" id={id}>
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge tone="warn">
+          <Icon name="warn" className="size-3" />
+          Unverified
+        </Badge>
+        <label htmlFor={`${id}-opt`} className="text-fine font-medium text-t1">
+          Send <span className="font-mono">{TIER_B_LORA_PARAM}</span> to this model anyway
+        </label>
+        <button
+          type="button"
+          id={`${id}-opt`}
+          role="switch"
+          aria-checked={optIn}
+          onClick={() => onChange({ optIn: !optIn, token })}
+          className={`btn btn-sm ml-auto gap-1.5 ${optIn ? "bg-warn/15 text-warn ring-1 ring-warn/35" : "btn-ghost"}`}
+        >
+          {optIn ? "Will be sent" : "Not sent"}
+          <span className="relative h-5 w-9 rounded-full transition" aria-hidden="true">
+            <span className={`absolute top-0.5 size-4 rounded-full bg-white transition-all ${optIn ? "left-[1.1rem]" : "left-0.5"}`} />
+          </span>
+        </button>
+      </div>
+      <p className="mt-1.5 text-micro leading-relaxed text-t3">
+        {tierB.reason} This model&apos;s schema does not declare the field, so WaveSpeed may reject the whole
+        request. Nothing is sent until you switch this on.
+      </p>
+      {optIn && (
+        <div className="mt-2.5">
+          <input
+            type="text"
+            value={token}
+            onChange={(e) => onChange({ optIn: true, token: e.target.value })}
+            placeholder="https://…safetensors"
+            aria-label={`${TIER_B_LORA_PARAM} value`}
+            aria-invalid={issue ? true : undefined}
+            className={`field font-mono ${issue ? "ring-crit/50" : ""}`}
+          />
+          {issue && <p className="mt-1 text-micro text-crit">{issue}</p>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function ParamForm({
   schema,
   values,
   onChange,
+  tierB = null,
 }: {
   schema: ModelSchema | null;
   values: Values;
   onChange: (fn: (v: Values) => Values) => void;
+  tierB?: TierBLora | null;
 }) {
   const set = (name: string, v: unknown) =>
     onChange((prev) => {
@@ -315,6 +385,18 @@ export default function ParamForm({
       return next;
     });
 
+  /* The opt-in is component state, not schema state, so it resets whenever the
+     schema changes — i.e. whenever the user picks a different model. */
+  const [tierBState, setTierBState] = useState({ optIn: false, token: "" });
+  useEffect(() => setTierBState({ optIn: false, token: "" }), [schema]);
+
+  /* tierBLoraPayload is the gate: an unticked box yields `{}`, so `set` is
+     called with undefined and the key is removed from `values`. */
+  const commitTierB = (next: { optIn: boolean; token: string }) => {
+    setTierBState(next);
+    set(TIER_B_LORA_PARAM, tierBLoraPayload(next)[TIER_B_LORA_PARAM]);
+  };
+
   /* Sort with the real ranking helper: required first, then images, selects,
      numbers, booleans, strings. `prompt` is excluded — it has its own surface. */
   const entries = useMemo(() => {
@@ -323,7 +405,7 @@ export default function ParamForm({
   }, [schema]);
 
   if (!schema) return null;
-  if (!entries.length) return <p className="text-fine text-t3">This model takes a prompt and nothing else.</p>;
+  if (!entries.length && !tierB) return <p className="text-fine text-t3">This model takes a prompt and nothing else.</p>;
 
   return (
     <div className="@container/form">
@@ -331,6 +413,9 @@ export default function ParamForm({
         {entries.map(([name, spec]) => (
           <Field key={name} name={name} spec={spec} value={values[name]} onSet={(v) => set(name, v)} />
         ))}
+        {tierB && (
+          <TierBLoraField tierB={tierB} optIn={tierBState.optIn} token={tierBState.token} onChange={commitTierB} />
+        )}
       </div>
     </div>
   );

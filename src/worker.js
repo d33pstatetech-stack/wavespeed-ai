@@ -1183,7 +1183,6 @@ async function handleApiRoute(request, env, path, ctx) {
                     // no history_id, because nothing was stored.
                     controller.enqueue(encoder.encode(`data: ${JSON.stringify({ history_id: null, refinement_rejected: reject })}\n\n`));
                   }
-                }
                 controller.enqueue(encoder.encode('data: [DONE]\n\n'));
                 controller.close();
                 break;
@@ -1416,6 +1415,59 @@ async function handleApiRoute(request, env, path, ctx) {
       ).bind(...vals, limit).all();
       return jsonResponse({ runs: results || [], total: results ? results.length : 0 });
     } catch (e) { return jsonResponse({ error: e.message }, 500); }
+  }
+
+  // --- DELETE /api/history/runs/:id -- drop one bad run and its archived copies.
+  // `runs` is a leaf: nothing references runs.id (lora_verifications.job_id
+  // points at runs.external_job_id), so there is no child cleanup and no
+  // cascade, and the parent enhancement stays put. R2 removal is best-effort:
+  // dropping the row while leaving the objects behind leaks storage forever
+  // with no UI left to find them, but an R2 hiccup must not lose the delete
+  // itself. Failures come back in r2Errors so the caller can show them.
+  {
+    const m = path.match(/^\/api\/history\/runs\/([^/]+)$/);
+    if (m && request.method === 'DELETE') {
+      const H = histDB(env);
+      if (!H) return jsonResponse({ error: 'HISTORY not configured' }, 500);
+      const raw = decodeURIComponent(m[1]);
+      if (!/^\d+$/.test(raw)) return jsonResponse({ error: 'id must be a positive integer' }, 400);
+      const id = Number(raw);
+      if (!Number.isSafeInteger(id) || id < 1) return jsonResponse({ error: 'id must be a positive integer' }, 400);
+      let row;
+      try {
+        row = await H.prepare('SELECT id, r2_keys_json FROM runs WHERE id = ?').bind(id).first();
+      } catch (e) {
+        return jsonResponse({ error: 'DB error: ' + String((e && e.message) || e).slice(0, 200) }, 500);
+      }
+      if (!row) return jsonResponse({ error: 'Run not found' }, 404);
+      let keys = [];
+      try {
+        const parsed = JSON.parse(row.r2_keys_json || '[]');
+        if (Array.isArray(parsed)) keys = parsed.map(String).filter(Boolean);
+      } catch { keys = []; }
+      try {
+        await H.prepare('DELETE FROM runs WHERE id = ?').bind(id).run();
+      } catch (e) {
+        return jsonResponse({ error: 'DB error: ' + String((e && e.message) || e).slice(0, 200) }, 500);
+      }
+      const r2Errors = [];
+      let r2Deleted = 0;
+      if (keys.length) {
+        if (!env.OUTPUTS_BUCKET) {
+          r2Errors.push('OUTPUTS_BUCKET not bound; ' + keys.length + ' object(s) left behind');
+        } else {
+          for (const key of keys) {
+            try {
+              await env.OUTPUTS_BUCKET.delete(key);
+              r2Deleted += 1;
+            } catch (e) {
+              r2Errors.push(key + ': ' + String((e && e.message) || e).slice(0, 160));
+            }
+          }
+        }
+      }
+      return jsonResponse({ ok: true, id, r2Deleted, r2Errors });
+    }
   }
 
   if (path === '/api/history/model-stats' && request.method === 'GET') {

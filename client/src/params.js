@@ -11,12 +11,56 @@ export function getParamType(name, spec = {}) {
   return 'string';
 }
 
+/* An adapter INPUT carries weights; an adapter STRENGTH does not. The two are
+   told apart by TYPE first, because the names collide:
+     lora_weights  (string) -> a path/URL to load. This IS an adapter input.
+     lora_weight   (number) -> "LoRA weight multiplier". This is NOT.
+     lora_rank     (number) -> a trainer hyper-parameter. This is NOT.
+   The previous name-only veto (/scale|strength|weight|multiplier/ before the
+   lora test) rejected 2 real WaveSpeed adapter inputs that declare
+   `lora_weights` in their live schema (pruna-ai/p-image/{edit,text-to-image}-lora)
+   while accepting 11 trainer models whose only "lora" param is a numeric
+   `lora_rank`. Type first, name second. lib/models.ts imports this function
+   rather than keeping a second copy that can drift. */
 export function isLoraParam(name, spec = {}) {
   const n = String(name || '').toLowerCase();
+  const t = String(spec?.type || '').toLowerCase();
+  // A number or a switch is a magnitude or a flag, never a weights path.
+  if (t === 'number' || t === 'integer' || t === 'boolean') return false;
   if (n === 'extra_lora' || n === 'extra_lora_weights' || /(^|_)replicate_weights$/.test(n)) return true;
+  if (/lora_weights|_lora_url$/.test(n)) return true;
   if (/scale|strength|weight|multiplier/.test(n)) return false;
   if (/lora|loras|adapter/.test(n)) return true;
+  // An array of adapter objects: `lora_list` / `loras` items carry a `$ref` to
+  // LoraItem. Scoped to lora-named refs so unrelated object arrays stop
+  // reading as adapters.
+  if (t === 'array') {
+    const items = JSON.stringify(spec?.items ?? {});
+    if (/\$ref/i.test(items) && /lora/i.test(items)) return true;
+  }
   return false;
+}
+
+/* ------------------------------------------------------------------
+   Tier B — the UNVERIFIED adapter slot.
+
+   A model whose published schema declares no adapter parameter cannot be
+   shown a verified LoRA field, because submitting an adapter param to it is a
+   guess the provider will reject. Some architectures may well support one
+   (see TIER_B_FAMILIES in lib/models.ts).
+
+   So Tier B gets an input that is OFF by default and only reaches the payload
+   when the user explicitly opts in. `tierBLoraPayload` is the single place that
+   decision is made, which is what makes it testable without a browser.
+
+   EMPTY for WaveSpeed, on purpose — see TIER_B_FAMILIES in lib/models.ts.
+   ------------------------------------------------------------------ */
+export const TIER_B_LORA_PARAM = 'extra_lora';
+
+/** `{}` unless the user ticked the opt-in AND typed something. */
+export function tierBLoraPayload({ optIn, token } = {}) {
+  const t = String(token ?? '').trim();
+  return optIn && t ? { [TIER_B_LORA_PARAM]: t } : {};
 }
 
 export function loraHintText() {
