@@ -27,6 +27,7 @@
  *                                                   tarball from replicate.com
  *                                                   and the download fails
  */
+import { normName } from '../lora-compat';
 
 export type App = 'muapi' | 'wavespeed' | 'replicate';
 
@@ -198,14 +199,25 @@ export const CONFIRMED_LORA_RUNS: { model: string; loras: string[]; apps: App[] 
   },
 ];
 
-/** True when this exact model + LoRA pair has produced a real image. */
+/**
+ * True when this exact model + LoRA pair has produced a real image.
+ *
+ * Both sides are compared through normName(), the same normalisation the
+ * compatibility classifier uses, so a pair still counts as confirmed when one
+ * side arrives with different separator styling (`flux 2 klein 9b` vs
+ * `flux-2-klein-9b`). Matching stayed exact-in-substance: normName only folds
+ * `.`/`-`/`_`/whitespace, it never makes two different models compare equal.
+ */
 export function isConfirmed(app: App, modelId: string | null | undefined, loraId: string): boolean {
   if (!modelId) return false;
+  const mkey = normName(modelId);
+  const lkey = normName(loraId);
+  if (!mkey) return false;
   const table = centralConfirmed && centralConfirmed.length ? centralConfirmed : CONFIRMED_LORA_RUNS;
   for (const row of table) {
-    if (row.model !== modelId) continue;
+    if (normName(row.model) !== mkey) continue;
     if (!row.apps.includes(app)) continue;
-    if (row.loras.includes(loraId)) return true;
+    if (row.loras.some((x) => normName(x) === lkey)) return true;
     // CivitAI entries are stored under either the id or the resolved URL.
     if (/^civitai:/.test(loraId)) {
       const n = loraId.replace(/^civitai:/, '');
