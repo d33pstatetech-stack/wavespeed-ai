@@ -256,8 +256,9 @@ is scoped to specific paths.
 |---|---|---|
 | `WAVESPEED_API_KEY` | yes | Task submission, polling, upload, estimate |
 | `WAVESPEED_BASE_URL` | no | Override the API base (`[vars]`, defaults to `https://api.wavespeed.ai/api/v3`) |
-| `OPENROUTER_API_KEY` | for enhancer | Default LLM provider |
-| `VENICE_API_KEY` | optional | Alternative LLM provider in the chain |
+| `EXPLABS_API_KEY` | for enhancer | Primary LLM provider (`api.experientiallabs.ai`) |
+| `OPENROUTER_API_KEY` | for enhancer | Fallback LLM provider |
+| `VENICE_API_KEY` | optional | Fallback LLM provider in the chain |
 | `HUGGINGFACE_API_KEY` | optional | Raises Hugging Face rate limits for LoRA fetches |
 | `CIVITAI_API_KEY` | optional | Authenticated CivitAI model lookups |
 | `JEV_API_KEY` | for verifier | Jev `/api/judge` proxy |
@@ -269,6 +270,7 @@ ephemeral hostnames that upstream fetchers cannot reach.
 
 Secrets are set with `wrangler secret put` and injected per request. `.dev.vars`
 and `.env` are git-ignored; never commit a populated copy.
+`.dev.vars.example` lists every binding the Worker reads, with placeholders.
 
 ---
 
@@ -307,6 +309,7 @@ cd client && npm run build && cd ..
 
 # Secrets
 npx wrangler secret put WAVESPEED_API_KEY
+npx wrangler secret put EXPLABS_API_KEY
 npx wrangler secret put OPENROUTER_API_KEY
 
 # Publish
@@ -331,20 +334,43 @@ the front end loads fine. Creating a self-hosted Access application over the
 
 The enhancer rewrites a prompt for the specific target model, adding sound-effect
 and dialogue cues when the target generates audio and timestamp directions for
-video models based on the requested duration. Responses stream to the browser as
-server-sent events and the full text is persisted once the stream completes.
+video models based on the requested duration. The template is modality-specific:
+image targets get composition, framing, lens, lighting, colour and style
+guidance plus an explicit prohibition on timestamps, camera-movement timelines,
+shot lists and duration cues, and they receive no video family preset. Media type
+is resolved from `body.modality` when the client sends one, then `models.group_of`,
+then `models.category`, then the model id — and the fallback is an image, never a
+video, so a mis-classified row cannot hand an image model a video prompt. Both
+clients send `modality` from the selected model's known group, so a bad
+server-side derivation is overridable.
+
+Responses stream to the browser as server-sent events and the full text is
+persisted once the stream completes. A reasoning provider streams a
+`reasoning_content` delta alongside each content delta; only `content` is
+accumulated for persistence, so chain-of-thought never reaches the stored or
+displayed prompt. A reply that is an obvious refusal is shown but not persisted
+— no `history_id` is emitted for it — because a declining model still answers
+with HTTP 200.
 
 Providers are tried in order until one succeeds:
 
-1. `https://openrouter.ai/api/v1` — `liquid/lfm-2.5-2.6b:free`
-2. `https://openrouter.ai/api/v1` — `openrouter/free`
-3. `https://api.venice.ai/api/v1` — `venice-uncensored`
+1. `https://api.experientiallabs.ai/v1` — `glm-5.3-flash-abliterated`
+2. `https://openrouter.ai/api/v1` — `liquid/lfm-2.5-2.6b:free`
+3. `https://openrouter.ai/api/v1` — `openrouter/free`
+4. `https://api.venice.ai/api/v1` — `venice-uncensored`
 
 Venice model IDs change as their catalog rotates, so any Venice entry is worth
 confirming before relying on it; a stale ID surfaces as a `404` that the chain
 falls through. The chain is stored in the `llm_config` D1 row when set through
-the settings modal and falls back to these defaults otherwise. Keys are resolved
-per provider from the matching environment secret and are always redacted on read.
+the settings modal and falls back to these defaults otherwise.
+
+Each provider entry declares `apiKeyEnv`, the Worker secret that authenticates
+that host. An entry without one — any row persisted in `llm_config` before that
+field existed — falls back to the older URL sniff, so stored configurations keep
+working. A value saved through the settings modal is validated to env-var syntax
+(`^[A-Z][A-Z0-9_]*$`) so a stored row cannot name an arbitrary binding. Note that
+the `llm_config` row stores keys in plaintext in D1; prefer `apiKeyEnv` with an
+empty `apiKey` so the secret never enters the database.
 
 The system prompt is deliberately framed as format optimization only, so the
 enhancer performs mechanical conversion for any subject matter and leaves

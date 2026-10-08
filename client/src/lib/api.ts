@@ -19,7 +19,7 @@ import {
   fetchLibrary as apiLibrary,
   fetchVerifications as apiVerifications,
 } from '../api';
-import { applySchema, toModel } from './models';
+import { applySchema, toModel, modelModality } from './models';
 import type { Lora, Model, ModelSchema } from './types';
 
 type Stats = Map<string, { runs: number; rating: number | null }>;
@@ -79,7 +79,12 @@ export async function estimateCost(model: Model | null, params: Record<string, u
   return model.cost || 0;
 }
 
-/** Real streaming enhancement through the Worker's SSE route. */
+/**
+ * Real streaming enhancement through the Worker's SSE route, which walks the
+ * configured provider chain. The selected model's own group is sent as
+ * `modality` so the Worker picks the image or video template from the client's
+ * reading rather than only its own derivation.
+ */
 export async function streamEnhance(
   rawPrompt: string,
   model: Model | null,
@@ -87,7 +92,7 @@ export async function streamEnhance(
   signal?: AbortSignal,
   params: Record<string, unknown> = {},
 ): Promise<{ text: string; providerUsed: string; modelUsed: string; historyId: number | null }> {
-  return postEnhance({ rawPrompt, modelId: model?.id || '', params, signal, onToken, onMeta: () => {} } as any);
+  return postEnhance({ rawPrompt, modelId: model?.id || '', params, modality: modelModality(model), signal, onToken, onMeta: () => {} } as any);
 }
 
 export interface SubmitResult {

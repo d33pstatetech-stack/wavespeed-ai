@@ -16,11 +16,85 @@ const WAVESPEED_BASE = 'https://api.wavespeed.ai/api/v3';
 
 const PROTECTED_API_PREFIXES = ['/api/generate', '/api/upload', '/api/predictions', '/api/sync', '/api/enhance', '/api/optimize', '/api/llm-config', '/api/prompts', '/api/wavespeed', '/api/cloud', '/api/history', '/api/lora', '/api/judge'];
 
+// Array order IS the priority mechanism: the first provider that answers wins.
+//
+// `apiKeyEnv` names the Worker secret that authenticates that host. It exists
+// because the previous resolution sniffed the URL
+// (`baseUrl.includes('venice.ai') ? VENICE_API_KEY : OPENROUTER_API_KEY`), which
+// silently hands any newly added host the OpenRouter key and fails auth. Entries
+// without `apiKeyEnv` — every row persisted in `llm_config` before this field
+// existed — still resolve through the old sniff in resolveProviderApiKey.
 const DEFAULT_LLM_PROVIDERS = [
-  { baseUrl: 'https://openrouter.ai/api/v1', model: 'liquid/lfm-2.5-2.6b:free', apiKey: '' },
-  { baseUrl: 'https://openrouter.ai/api/v1', model: 'openrouter/free', apiKey: '' },
-  { baseUrl: 'https://api.venice.ai/api/v1', model: 'venice-uncensored', apiKey: '' },
+  { provider: 'explabs', apiKeyEnv: 'EXPLABS_API_KEY', baseUrl: 'https://api.experientiallabs.ai/v1', model: 'glm-5.3-flash-abliterated', apiKey: '' },
+  { provider: 'openrouter', apiKeyEnv: 'OPENROUTER_API_KEY', baseUrl: 'https://openrouter.ai/api/v1', model: 'liquid/lfm-2.5-2.6b:free', apiKey: '' },
+  { provider: 'openrouter', apiKeyEnv: 'OPENROUTER_API_KEY', baseUrl: 'https://openrouter.ai/api/v1', model: 'openrouter/free', apiKey: '' },
+  { provider: 'venice', apiKeyEnv: 'VENICE_API_KEY', baseUrl: 'https://api.venice.ai/api/v1', model: 'venice-uncensored', apiKey: '' },
 ];
+// ─── Stream accumulation (K3) ───
+// Reasoning models (glm-5.3-flash-abliterated is the new default) stream a
+// `reasoning_content` delta for every few `content` deltas — 27 to 2 on the
+// verified run. The previous accumulator was
+// `delta.content || delta.reasoning_content`, which appended chain-of-thought
+// to the user-facing enhanced prompt and stored that. The two channels are now
+// kept apart: only `content` is the answer, and only `content` is persisted.
+// The clients were already correct here — they read `delta.content` only.
+function createEnhanceAccumulator() {
+  return { content: '', reasoning: '' };
+}
+function accumulateEnhanceDelta(acc, delta) {
+  if (!acc || !delta) return acc;
+  if (typeof delta.content === 'string' && delta.content) acc.content += delta.content;
+  if (typeof delta.reasoning_content === 'string' && delta.reasoning_content) acc.reasoning += delta.reasoning_content;
+  if (typeof delta.reasoning === 'string' && delta.reasoning && !delta.reasoning_content) acc.reasoning += delta.reasoning;
+  return acc;
+}
+// ─── Refusal guard (K10) ───
+// A declining model still returns HTTP 200 with prose, so a refusal was being
+// stored as a successful enhancement and rendered as the enhanced prompt. Only
+// three shapes are rejected, all deliberately narrow:
+//
+//   empty      — nothing to store.
+//   refusal    — a first-person refusal opener inside the first 60 characters,
+//               with no quote character before it. Both conditions matter: the
+//               system prompt demands prompt-only output, so a real refusal
+//               opens with the apology ("I'm sorry, but…", "I cannot…"), while
+//               a template that merely *quotes* one ('reply with "I'm sorry, I
+//               can't do that"') has a quote in front of it and is a legitimate
+//               enhancement.
+//   too_short  — fewer than 24 non-space characters *when the raw prompt is at
+//               least that long*, or under 40% of a raw prompt of at least 80
+//               characters. 24 was chosen because the shortest legitimate
+//               keyword-style refinement this app produces is several dozen
+//               characters; anything shorter cannot describe a subject,
+//               composition or style. Both guards are conditional on the input,
+//               so a genuinely one-word prompt that refines to one word still
+//               persists, while a long input that comes back as a disclaimer
+//               does not.
+const ENHANCE_MIN_NONSPACE_CHARS = 24;
+const ENHANCE_REFUSAL_OPENERS = [
+  "i'm sorry", 'i am sorry', 'sorry, but', 'i apologize', 'i apologise',
+  'i cannot', 'i can not', "i can't", 'i cant', "i won't", 'i will not',
+  "i'm not able to", 'i am not able to', "i'm unable to", 'i am unable to',
+  'i must decline', 'i have to decline', 'i must refuse', 'i cannot assist',
+  "i can't assist", 'i cannot help', "i can't help", 'i cannot provide',
+  "i can't provide", 'i cannot fulfill', "i can't fulfill", 'i cannot comply',
+  "i can't comply", 'i do not feel comfortable', "i don't feel comfortable",
+  'i must inform you', 'as an ai language model', "i'm an ai", 'i am an ai',
+];
+function enhancementRejectReason(enhanced, rawPrompt) {
+  const text = String(enhanced || '').trim();
+  if (!text) return 'empty';
+  const norm = text.toLowerCase().replace(/[\u2018\u2019]/g, "'");
+  const head = norm.slice(0, 60).replace(/^[\s"'`*_>(\[-]+/, '');
+  const openerAt = ENHANCE_REFUSAL_OPENERS.find((p) => head.includes(p));
+  // Quoted refusal inside a template is legitimate copy, not a refusal.
+  if (openerAt && !/["'\u201c\u201d]/.test(norm.slice(0, norm.indexOf(openerAt)))) return 'refusal';
+  const nonSpace = text.replace(/\s+/g, '').length;
+  const rawLen = String(rawPrompt || '').trim().length;
+  if (nonSpace < ENHANCE_MIN_NONSPACE_CHARS && rawLen >= ENHANCE_MIN_NONSPACE_CHARS) return 'too_short';
+  if (rawLen >= 80 && text.length < rawLen * 0.4) return 'too_short';
+  return null;
+}
 const MODEL_PRESETS = {
   seedance: `Seedance models: Convert to screenplay format with [Shot Type] + [Subject] + [Action] + temporal transitions + [Lighting] + [Audio cues]. Use @image1..@image9 for omni_reference when images are provided. Duration 4-15s, aspect 21:9/16:9/4:3/1:1/3:4/9:16.`,
   wan: `Wan models: Use lightweight prompt per replicate_docs â€” resolution 480p/720p/1080p, aspect adaptive or 16:9/9:16/1:1/4:3/3:4 (ignored when image provided), duration 2-30s, enable_prompt_expansion when prompt is short.`,
@@ -28,7 +102,21 @@ const MODEL_PRESETS = {
   kling: `Kling/Luma models: Natural language + key motion descriptors (dolly, pan, orbital), keep concise.`,
   default: ``,
 };
-const ENHANCER_TEMPLATE = `refine the following [Media Generation Type] prompt, specifically to optimize it for [Model]. This should include determining the optimal prompt length, or at least the ideal minimum and maximum word counts, determining whether the model excels with keyword based prompts or full narrative descriptions, what types of prompts work best (describe everything vs just describe movement, etc), whether it accepts timestamp direction (at 00:05, do this, at 00:10 do that, etc) and if it does add these timestamp directions based on the total length of the video (as input by the user) and estimating the time it would take for the described actions in the scene to take place, determine if a certain camera lens or videography style works well if called out for the specific model, translate any vague camera movement directions into videographer jargon (dolly out, orbital, chase cam, etc).  The video will be generated at [resolution] and [aspect ratio] (only include this if it would benefit the prompt for this model.  \nif [Model] includes audio generation, insert appropriate sound effect cues and format any dialogue into the most AI friendly format.`;
+// Two templates, not one. The single template below used to be video prose end
+// to end: it asked for "the total length of the video", timestamp directions,
+// and camera-movement jargon for *every* target, and the only modality signal
+// it received was a bare token like "text-to-image". Image models were therefore
+// handed timestamp and camera-move instructions and returned video-shaped
+// prompts. The image branch below deliberately never contains the words
+// "video", "timestamp" as an instruction to add them, or a timecode example —
+// it states the still-image contract positively and forbids the video syntax.
+const ENHANCER_TEMPLATE_VIDEO = `refine the following [Media Generation Type] prompt, specifically to optimize it for [Model]. This should include determining the optimal prompt length, or at least the ideal minimum and maximum word counts, determining whether the model excels with keyword based prompts or full narrative descriptions, what types of prompts work best (describe everything vs just describe movement, etc), whether it accepts timestamp direction (at 00:05, do this, at 00:10 do that, etc) and if it does add these timestamp directions based on the total length of the video (as input by the user) and estimating the time it would take for the described actions in the scene to take place, determine if a certain camera lens or videography style works well if called out for the specific model, translate any vague camera movement directions into videographer jargon (dolly out, orbital, chase cam, etc).  The video will be generated at [resolution] and [aspect ratio] (only include this if it would benefit the prompt for this model.  \nif [Model] includes audio generation, insert appropriate sound effect cues and format any dialogue into the most AI friendly format.`;
+const ENHANCER_TEMPLATE_IMAGE = `refine the following [Media Generation Type] prompt, specifically to optimize it for a still-image model ([Model]). This should include determining the optimal prompt length, or at least the ideal minimum and maximum word counts, and whether the model excels with keyword based prompts or full narrative descriptions. Then describe what makes a single still frame read correctly: the subject and its defining attributes, composition and framing, camera position and angle, a lens or focal length that suits the subject and the framing, lighting direction and quality, colour palette, medium or artistic style, and the level of fine detail. If a specific still-photography or illustration convention suits this model (shot on 85mm, shallow depth of field, studio lighting, rim light, hyper-detailed, flat vector, film grain, etc) name it explicitly.
+This target produces a SINGLE STILL IMAGE. Do not write timestamps or timecodes, do not write a duration or a length in seconds, do not write camera-movement timelines, do not write shot lists, and do not describe anything unfolding over time. If the source prompt describes motion or a change across time, resolve it into one decisive frozen moment: choose the single frame that best conveys the intent and describe that frame as a static scene. Motion that is only meaningful inside a still frame (hair in wind, splashing water, a blurred passing figure) is fine, but as a frozen instant rather than a progression.
+The image will be generated at [resolution] and [aspect ratio] (only include this if it would benefit the prompt for this model.  \nif [Model] includes audio generation, insert appropriate sound effect cues and format any dialogue into the most AI friendly format.`;
+// Audio-class and unclassified ("Other": trainers, upscalers, LoRA jobs) targets
+// get neither still-image nor video guidance.
+const ENHANCER_TEMPLATE_GENERIC = `refine the following [Media Generation Type] prompt, specifically to optimize it for [Model]. This should include determining the optimal prompt length, or at least the ideal minimum and maximum word counts, and whether the model excels with keyword based prompts or full narrative descriptions, plus the structure this specific model expects. Add no timestamps, timecodes, camera-movement timelines or shot lists. If the model generates audio, insert appropriate sound effect cues and format any dialogue into the most AI friendly format.`;
 
 // WaveSpeed `type` â†’ display category. Empty string = resolve per-model
 // from the model-id task suffix (e.g. lora-support + text-to-image id).
@@ -102,32 +190,112 @@ function deriveTechniques(content, ctx) {
   if (!t.length) t.push('format_optimization');
   return t;
 }
-function deriveMediaTypeWorker(model) {
-  if (!model) return 'text-to-video';
-  const id = model.id || '';
-  const cat = (model.category || '').toLowerCase();
-  if (id.includes('reference-to-video')) return 'reference-to-video';
-  if (id.includes('image-to-video') || id.includes('-i2v') || id.includes('i2v')) return 'image-to-video';
-  if (id.includes('text-to-video') || id.includes('-t2v')) return 'text-to-video';
-  if (id.includes('image-to-image') || id.includes('-i2i') || cat.includes('image to image')) return 'image-to-image';
-  if (cat.includes('text to image')) return 'text-to-image';
-  if (cat.includes('image to 3d')) return 'image-to-3d';
-  if (cat.includes('video to text')) return 'video-to-text';
-  if (cat.includes('image to text')) return 'image-to-text';
-  if (cat.includes('video to video') || cat.includes('video: edit')) return 'video-to-video';
-  if (cat.includes('audio')) return 'audio generation';
-  if (cat.includes('3d')) return 'text-to-3d';
-  return cat.replace(/ /g, '-') || 'text-to-video';
+// ─── Modality classification (K2) ───
+// The enhancer used to derive the media type from the model id and category
+// string only, and defaulted to 'text-to-video' — so an image model whose id
+// carried no t2i/i2i token was told to write timestamp directions. Resolution is
+// now explicit about which source is trusted, in this order:
+//
+//   1. `body.modality` from the client ('image' | 'video'), validated
+//   2. models.group_of — populated for every seeded row
+//   3. models.category — the coarse catalogue vocabulary
+//   4. an id/category directional ladder
+//
+// and the fallback is 'image', never 'video': mis-labelling a video model as an
+// image costs a still-image prompt, while the reverse is the bug being fixed.
+const MODALITY_GROUP_MAP = [
+  [/3d|three[-_ ]?d|mesh|voxel/i, '3d'],
+  [/video|motion|animate|avatar|lip[-_ ]?sync|talking[-_ ]?head|dance/i, 'video'],
+  [/audio|speech|voice|sound|music|song|tts|stt|transcri/i, 'audio'],
+  [/image|picture|photo|draw|paint|illustrat|logo|photo-pack|upsc|restor/i, 'image'],
+  [/text|llm|chat|seo|translat|summar/i, 'text'],
+];
+function normalizeModelGroupWorker(model) {
+  const raw = String((model && (model.group_of || model.group)) || '').trim();
+  if (!raw) return null;
+  for (const [re, g] of MODALITY_GROUP_MAP) if (re.test(raw)) return g;
+  return null;
+}
+// Category → modality, reusing inferGroupOf so there is one vocabulary. '3d' is
+// checked first because inferGroupOf only excludes 'video' from its image test,
+// which mislabels the catalogue's "Image to 3D" rows (27 of them) as images.
+// inferGroupOf itself is left alone: it also seeds models.group_of in syncCatalog,
+// so changing it would silently reclassify the catalogue on the next sync.
+function inferCategoryClassWorker(category) {
+  const c = String(category || '').toLowerCase();
+  if (!c) return null;
+  if (c.includes('3d')) return '3d';
+  const g = inferGroupOf(c);
+  return g || null;
+}
+function mediaTypeIsVideo(mediaType) {
+  return /video/.test(String(mediaType || ''));
+}
+/**
+ * @param model D1 `models` row (or anything with id/category/group_of)
+ * @param explicitModality validated 'image' | 'video' | null from body.modality
+ * @returns one of text-to-image | image-to-image | text-to-video |
+ *   image-to-video | video-to-video | reference-to-video | audio generation |
+ *   text-to-3d | text-to-text | other
+ */
+function deriveMediaTypeWorker(model, explicitModality) {
+  const id = String((model && model.id) || '').toLowerCase();
+  const cat = String((model && model.category) || '').toLowerCase();
+
+  const groupClass = normalizeModelGroupWorker(model);
+  const categoryClass = inferCategoryClassWorker(cat);
+  let modality;
+  if (explicitModality === 'image' || explicitModality === 'video') modality = explicitModality;
+  else if (groupClass) modality = groupClass;
+  else if (categoryClass) modality = categoryClass;
+  else modality = null;
+
+  // Directional ladder, gated by the resolved modality so a token can never flip
+  // the class (an id like `wavespeed-ai/video-upscaler` is a video tool whose
+  // group_of is 'other', and `alibaba/wan-2.5/image-edit` is an image tool whose
+  // id contains a video family's name).
+  const dirVideo = id.includes('reference-to-video') ? 'reference-to-video'
+    : /image-to-video|-i2v/.test(id) || cat.includes('image to video') ? 'image-to-video'
+    : /text-to-video|-t2v/.test(id) || cat.includes('text to video') ? 'text-to-video'
+    : null;
+  const dirVideo2 = modality === 'video' && (cat.includes('video to video') || cat.includes('audio to video')) ? 'video-to-video' : null;
+  const dirImage = /image-to-image|-i2i/.test(id) || cat.includes('image to image') ? 'image-to-image' : null;
+
+  if (modality === 'video') {
+    return dirVideo2 || dirVideo || (cat.includes('video to text') ? 'video-to-text' : null) || 'text-to-video';
+  }
+  if (modality === 'image') {
+    // The catalogue seeds "Image to 3D" and "Image to Text" rows with
+    // group_of='image' (inferGroupOf's image test only excludes 'video'), so the
+    // category is the better signal for these two and the old media types are
+    // preserved rather than flattened into text-to-image.
+    return (cat.includes('image to text') ? 'image-to-text' : null)
+      || (/to[-_ ]?3d/.test(cat) ? 'image-to-3d' : null)
+      || dirImage || 'text-to-image';
+  }
+  if (modality === 'audio') return 'audio generation';
+  if (modality === '3d') return 'text-to-3d';
+  if (modality === 'text') return 'text-to-text';
+  // "Other" rows in this catalogue (trainers, LoRA jobs, upscalers) are neither
+  // an image nor a video contract; keep the legacy token and take the generic
+  // template rather than guessing.
+  if (modality === 'other') return 'other';
+  // Nothing classified the row: conservative, and never video.
+  return dirImage || 'text-to-image';
 }
 function buildEnhancerSystemPrompt(raw, ctx) {
-  let t = ENHANCER_TEMPLATE.replace('[Media Generation Type]', ctx.mediaType).replace('[Model]', ctx.model);
+  const isVideo = mediaTypeIsVideo(ctx.mediaType);
+  const isAudio3dText = /^(audio|text-to-3d|text-to-text|other)/.test(String(ctx.mediaType || ''));
+  const baseTemplate = isVideo ? ENHANCER_TEMPLATE_VIDEO : isAudio3dText ? ENHANCER_TEMPLATE_GENERIC : ENHANCER_TEMPLATE_IMAGE;
+  let t = baseTemplate.replace('[Media Generation Type]', ctx.mediaType).replace('[Model]', ctx.model);
   const resAspect = [];
   if (ctx.resolution) resAspect.push(ctx.resolution);
   if (ctx.aspectRatio) resAspect.push(ctx.aspectRatio);
   if (resAspect.length) {
     t = t.replace('[resolution] and [aspect ratio]', resAspect.join(' and '));
   } else {
-    t = t.replace(/The video will be generated at \[resolution\] and \[aspect ratio\][^\n]*\n?/, '');
+    // The image template says "image", the video one says "video" — match either.
+    t = t.replace(/The (?:video|image) will be generated at \[resolution\] and \[aspect ratio\][^\n]*\n?/, '');
   }
   if (!ctx.hasAudio) {
     t = t.replace(/if \[Model\] includes audio generation,.*format\./, '').trim();
@@ -137,8 +305,8 @@ function buildEnhancerSystemPrompt(raw, ctx) {
   if (!hasDialogueCues(raw)) {
     t = t.replace(/and format any dialogue into the most AI friendly format\./, ' (dialogue formatting not needed for this prompt).');
   }
-  if (ctx.duration && ctx.mediaType.includes('video')) {
-    t += `\nVideo length: ${ctx.duration} seconds â€” add timestamp directions accordingly.`;
+  if (ctx.duration && isVideo) {
+    t += `\nVideo length: ${ctx.duration} seconds — add timestamp directions accordingly.`;
   }
   // Model-specific lightweight preset (additive, per advice, prioritizes replicate schema)
   const fam = (ctx.model || '').toLowerCase();
@@ -152,7 +320,12 @@ function buildEnhancerSystemPrompt(raw, ctx) {
   // the overrides still appends the legacy preset to a guided prompt, giving
   // the enhancer two contradictory sets of conventions at once.
   let preset = guideBlock ? null : MODEL_PRESETS.default;
-  if (!guideBlock) {
+  // All four presets are video conventions (screenplay structure, timecoded
+  // [0s-3s], dolly/pan/orbital). Appending one to a still-image prompt is
+  // exactly how image targets picked up motion and timing language, so image
+  // and non-video targets get no family preset. This bites in this catalogue:
+  // `alibaba/wan-2.5/image-edit` is group_of=image but its id contains 'wan'.
+  if (!guideBlock && isVideo) {
     if (fam.includes('seedance')) preset = MODEL_PRESETS.seedance;
     else if (fam.includes('wan')) preset = MODEL_PRESETS.wan;
     else if (fam.includes('minimax') || fam.includes('hailuo')) preset = MODEL_PRESETS.minimax;
@@ -215,16 +388,30 @@ async function getLLMConfigWorker(env) {
       if (cfg.providers && cfg.providers.length) return cfg;
     }
   } catch {}
-  // 2. Env defaults â€” Venice is now primary, OpenRouter is fallback
-  const veniceKey = env.VENICE_API_KEY || '';
-  const openrouterKey = env.OPENROUTER_API_KEY || '';
+  // 2. Env defaults — Experimental Labs is primary, OpenRouter then Venice follow
   return {
-    providers: DEFAULT_LLM_PROVIDERS.map((p) => {
-      const isVenice = (p.baseUrl || '').includes('venice.ai');
-      const envKey = isVenice ? veniceKey : openrouterKey;
-      return { ...p, apiKey: envKey || p.apiKey };
-    }),
+    providers: DEFAULT_LLM_PROVIDERS.map((p) => ({ ...p, apiKey: resolveProviderApiKey(p, env) })),
   };
+}
+/**
+ * The key that authenticates one provider, in priority order:
+ *   1. a key stored on the entry (D1 row or settings modal)
+ *   2. the secret named by `apiKeyEnv`
+ *   3. the legacy URL sniff, so rows persisted before `apiKeyEnv` existed keep
+ *      working exactly as they did
+ *
+ * Never infer from the host for a provider that declares `apiKeyEnv`: that is
+ * the bug this replaced — a new host with no declared env var was handed the
+ * OpenRouter key and every request failed auth.
+ */
+function resolveProviderApiKey(provider, env) {
+  const stored = String((provider && provider.apiKey) || '').trim();
+  if (stored) return stored;
+  const named = String((provider && provider.apiKeyEnv) || '').trim();
+  if (named) return String(env[named] || '').trim();
+  const base = String((provider && provider.baseUrl) || '');
+  const legacy = base.includes('venice.ai') ? 'VENICE_API_KEY' : 'OPENROUTER_API_KEY';
+  return String(env[legacy] || '').trim();
 }
 function redactLLMConfig(cfg) {
   return { providers: (cfg.providers || []).map((p) => ({ ...p, apiKey: p.apiKey ? '***' : '' })) };
@@ -656,14 +843,27 @@ async function handleApiRoute(request, env, path, ctx) {
     // Load existing to preserve masked keys
     let existing = null;
     try { existing = await getLLMConfigWorker(env); } catch { existing = null; }
+    // `apiKeyEnv` is the only way a stored entry can name a binding, so it is
+    // constrained to env-var syntax. Without this a saved row could name any
+    // other binding on the Worker and have it substituted into a provider key.
+    for (const p of incoming.providers) {
+      const declared = String((p && p.apiKeyEnv) || '').trim();
+      if (declared && !/^[A-Z][A-Z0-9_]*$/.test(declared)) {
+        return jsonResponse({ error: `apiKeyEnv must be an env var name (got ${JSON.stringify(declared.slice(0, 40))})` }, 400);
+      }
+    }
     const providers = incoming.providers.map((p, i) => {
       let apiKey = (p.apiKey || '').trim();
       if (apiKey === '***' && existing && existing.providers[i]) apiKey = existing.providers[i].apiKey;
-      // Also allow env fallback if still empty and is default OpenRouter entry
+      // provider/apiKeyEnv are carried through verbatim: dropping them here
+      // would strand the entry on the legacy URL sniff and authenticate it with
+      // the wrong secret.
       return {
         baseUrl: (p.baseUrl || 'https://openrouter.ai/api/v1').trim().replace(/\/$/, ''),
         model: (p.model || '').trim(),
         apiKey,
+        ...(String(p.provider || '').trim() ? { provider: String(p.provider).trim().slice(0, 40) } : {}),
+        ...(String(p.apiKeyEnv || '').trim() ? { apiKeyEnv: String(p.apiKeyEnv).trim() } : {}),
       };
     }).filter((p) => p.model);
     if (!providers.length) return jsonResponse({ error: 'At least one provider with a model is required' }, 400);
@@ -833,11 +1033,23 @@ async function handleApiRoute(request, env, path, ctx) {
     const model = await DB.prepare('SELECT * FROM models WHERE id = ?').bind(modelId).first();
     if (!model) return jsonResponse({ error: 'Model not found' }, 404);
 
-    const mediaType = deriveMediaTypeWorker(model);
+    // Explicit client-side modality override (K2). The client already knows the
+    // selected model's modality, so it can correct a bad server-side
+    // derivation. Anything else is ignored rather than rejected, and null means
+    // "derive it yourself".
+    const requestedModality = body.modality === 'image' || body.modality === 'video' ? body.modality : null;
+    const mediaType = deriveMediaTypeWorker(model, requestedModality);
     const aspectRatio = userParams.aspect_ratio || null;
     const resolution = userParams.resolution || (userParams.width && userParams.height ? `${userParams.width}x${userParams.height}` : null) || null;
     const duration = userParams.duration || null;
-    const hasAudio = !!(model.id.includes('seedance') || model.id.includes('wan') || model.family === 'seedance' || model.group_of === 'audio' || (model.id.includes('audio')));
+    // Audio is a property of video/audio targets. The old expression matched any
+    // id containing "audio"/"wan"/"seedance" regardless of modality, so
+    // `alibaba/wan-2.5/image-edit` (group_of=image) got the audio clause and
+    // `bytedance/seedance-2.5/talking-avatar` did too, while genuine
+    // image-to-video rows that name no family fell through.
+    const audioCapable = model.group_of === 'audio' || mediaType === 'audio generation';
+    const hasAudio = audioCapable || (mediaTypeIsVideo(mediaType)
+      && !!(model.id.includes('seedance') || model.id.includes('wan') || model.family === 'seedance' || model.id.includes('audio')));
     const guide = await getPromptGuide(env, model);
     const ctx = { model: model.id, mediaType, aspectRatio, resolution, duration, hasAudio, guideBlock: guide && guide.block };
     const systemPrompt = buildEnhancerSystemPrompt(rawPrompt, ctx);
@@ -852,8 +1064,7 @@ async function handleApiRoute(request, env, path, ctx) {
 
     for (const p of llmCfg.providers) {
       const baseUrl = (p.baseUrl || 'https://openrouter.ai/api/v1').replace(/\/$/, '');
-      const isVenice = baseUrl.includes('venice.ai');
-      const apiKey = p.apiKey || (isVenice ? (env.VENICE_API_KEY || '') : (env.OPENROUTER_API_KEY || '')) || '';
+      const apiKey = resolveProviderApiKey(p, env);
       if (!apiKey) { noteFail(p.model, baseUrl, 'Missing API key'); continue; }
       let llmRes;
       // Fail-fast: 12s abort for initial connect, no retry per model (single try)
@@ -899,19 +1110,28 @@ async function handleApiRoute(request, env, path, ctx) {
       if (wantsJson) {
         try {
           const j = await llmRes.json();
+          // Content only — a reasoning model also returns `reasoning`, which is
+          // chain-of-thought and must never become the enhanced prompt.
           const content = j.choices?.[0]?.message?.content || j.choices?.[0]?.delta?.content || '';
           if (!content) { noteFail(p.model, baseUrl, 'Empty LLM response'); continue; }
           // OpenRouter reports the underlying model (routers); Venice echoes its own.
           const actualModel = j.model || p.model;
           const techniques = deriveTechniques(content, ctx);
-          const history_id = await histInsertEnhancement(env, {
+          // K10: a refusal is still a 200 with body text. Persist it only if it
+          // reads like an actual refinement.
+          const reject = enhancementRejectReason(content, rawPrompt);
+          const history_id = reject ? null : await histInsertEnhancement(env, {
             source_app: 'wavespeed', kind: isOptimize ? 'optimized' : 'enhanced',
             raw_prompt: rawPrompt, enhanced: content, target_provider: 'wavespeed',
             target_model: model.id, params: userParams, llm_provider: baseUrl, llm_model: actualModel,
                       guide_key: guide && guide.guideKey,
                       retrieval_refs: guide ? [{ kind: 'prompt-atlas', guide_key: guide.guideKey }] : [],
           });
-          return jsonResponse({ optimized_prompt: content, enhanced: content, techniques_applied: techniques, providerUsed: baseUrl, modelUsed: p.model, actualModel, history_id, ctx });
+          return jsonResponse({
+            optimized_prompt: content, enhanced: content, techniques_applied: techniques,
+            providerUsed: baseUrl, modelUsed: p.model, actualModel, history_id, ctx,
+            ...(reject ? { refinement_rejected: reject } : {}),
+          });
         } catch (e) {
           noteFail(p.model, baseUrl, e.message);
           continue;
@@ -919,7 +1139,7 @@ async function handleApiRoute(request, env, path, ctx) {
       }
 
       // Stream OpenRouter SSE directly to client, capturing full text to persist
-      let fullEnhanced = '';
+      const acc = createEnhanceAccumulator();
       let actualModel = p.model;
       const streamHeaders = {
         'Content-Type': 'text/event-stream; charset=utf-8',
@@ -943,17 +1163,27 @@ async function handleApiRoute(request, env, path, ctx) {
             while (true) {
               const { done, value } = await reader.read();
                 if (done) {
-                  // Persist after stream (best-effort)
-                  if (fullEnhanced) {
+                  // Persist after stream (best-effort). Only the assistant's
+                  // answer is stored; see accumulateEnhanceDelta for why the
+                  // reasoning channel must stay out of it.
+                  const enhancedText = acc.content;
+                  const reject = enhancementRejectReason(enhancedText, rawPrompt);
+                  if (enhancedText && !reject) {
                     const hid = await histInsertEnhancement(env, {
                       source_app: 'wavespeed', kind: 'enhanced',
-                      raw_prompt: rawPrompt, enhanced: fullEnhanced, target_provider: 'wavespeed',
+                      raw_prompt: rawPrompt, enhanced: enhancedText, target_provider: 'wavespeed',
                       target_model: model.id, params: userParams, llm_provider: baseUrl, llm_model: actualModel,
                       guide_key: guide && guide.guideKey,
                       retrieval_refs: guide ? [{ kind: 'prompt-atlas', guide_key: guide.guideKey }] : [],
                     });
                     if (hid) controller.enqueue(encoder.encode(`data: ${JSON.stringify({ history_id: hid })}\n\n`));
+                  } else if (reject) {
+                    // Stream shape is unchanged — the client still reads
+                    // delta.content and still terminates on [DONE]; it just gets
+                    // no history_id, because nothing was stored.
+                    controller.enqueue(encoder.encode(`data: ${JSON.stringify({ history_id: null, refinement_rejected: reject })}\n\n`));
                   }
+                }
                 controller.enqueue(encoder.encode('data: [DONE]\n\n'));
                 controller.close();
                 break;
@@ -970,8 +1200,7 @@ async function handleApiRoute(request, env, path, ctx) {
                 if (d === '[DONE]' || !d) continue;
                 try {
                   const j = JSON.parse(d);
-                  const delta = j.choices?.[0]?.delta?.content || j.choices?.[0]?.delta?.reasoning_content || '';
-                  if (delta) fullEnhanced += delta;
+                  accumulateEnhanceDelta(acc, j.choices?.[0]?.delta);
                   if (j.model) actualModel = j.model;
                 } catch {}
               }

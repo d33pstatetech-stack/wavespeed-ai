@@ -1,0 +1,40 @@
+# Local development secrets for the WaveSpeed Prompt Generator Worker.
+#
+# Copy to `.dev.vars` (git-ignored) and fill in the values you have:
+#     cp .dev.vars.example .dev.vars
+# `wrangler dev` injects these as Worker bindings. In production the same names
+# are set per environment with `npx wrangler secret put <NAME>` — never commit a
+# populated copy of either file.
+
+# ── Generation (required) ────────────────────────────────────────────────────
+# Task submission, polling, upload and estimate against api.wavespeed.ai.
+WAVESPEED_API_KEY=your_wavespeed_api_key_here
+
+# ── Prompt enhancer ──────────────────────────────────────────────────────────
+# Tried in this order; the first provider that answers wins. Each entry in
+# src/worker.js DEFAULT_LLM_PROVIDERS names its secret here via `apiKeyEnv`,
+# so a provider added to the Worker needs a matching line in this file.
+EXPLABS_API_KEY=your_experientiallabs_api_key_here
+OPENROUTER_API_KEY=your_openrouter_api_key_here
+VENICE_API_KEY=your_venice_api_key_here
+
+# Optional overrides (defaults already set in wrangler.toml [vars], only needed
+# to point at a non-default host):
+# WAVESPEED_BASE_URL=https://api.wavespeed.ai/api/v3
+# GUIDE_INJECTION=1            # "0" disables Prompt Atlas guide injection
+
+# ── Optional ─────────────────────────────────────────────────────────────────
+# Jev structured-judgment proxy behind POST /api/judge. Without it the judge
+# route returns { ok: false } instead of failing hard.
+JEV_API_KEY=your_jev_api_key_here
+
+# LoRA URL resolution from Hugging Face / CivitAI model cards. Optional, but a
+# tokenless HF read hits the anonymous rate limit quickly.
+HUGGINGFACE_API_KEY=your_huggingface_api_key_here
+CIVITAI_API_KEY=your_civitai_api_key_here
+
+# R2 API token for presigned GET URLs (R2_ACCESS_KEY_ID/R2_SECRET_ACCESS_KEY).
+# Only needed for the /api/cloud/resolve route; R2_ACCOUNT_ID is a plain var in
+# wrangler.toml and R2_BUCKET defaults to genai-assets.
+# R2_ACCESS_KEY_ID=your_r2_access_key_id_here
+# R2_SECRET_ACCESS_KEY=your_r2_secret_access_key_here

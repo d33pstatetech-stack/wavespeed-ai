@@ -160,10 +160,13 @@ export async function saveLlmConfig(config) {
   }).catch(() => {});
 }
 
-// Streaming enhance — real protocol: POST {rawPrompt, modelId, params} →
+// Streaming enhance — real protocol: POST {rawPrompt, modelId, params, modality} →
 // SSE OpenAI-style chunks (choices[0].delta.content) + {history_id} event,
 // X-Provider-Used / X-Model-Used headers, JSON fallback {enhanced,…}.
-export async function streamEnhance({ rawPrompt, modelId, params, signal, onToken, onMeta }) {
+// `modality` ('image' | 'video' | null) is the client's own read of the selected
+// model; the Worker prefers it over its own derivation so a mis-classified
+// model row cannot hand an image target the video template.
+export async function streamEnhance({ rawPrompt, modelId, params, modality, signal, onToken, onMeta }) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 50000);
   const onAbort = () => ctrl.abort();
@@ -172,7 +175,7 @@ export async function streamEnhance({ rawPrompt, modelId, params, signal, onToke
     const res = await fetch(`${API}/api/enhance`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ rawPrompt, modelId, params }),
+      body: JSON.stringify({ rawPrompt, modelId, params, ...(modality ? { modality } : {}) }),
       signal: ctrl.signal,
     });
     clearTimeout(timer);

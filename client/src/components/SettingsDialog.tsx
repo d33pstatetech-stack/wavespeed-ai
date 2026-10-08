@@ -162,6 +162,19 @@ export default function SettingsDialog({ open, onClose }: { open: boolean; onClo
                     className="field font-mono"
                   />
                 </label>
+              <label className="grid gap-1">
+                  <span className="text-micro text-t3">Env secret</span>
+                  <input
+                    type="text"
+                    value={p.apiKeyEnv ?? ""}
+                    onChange={(e) => patch(i, { apiKeyEnv: e.target.value })}
+                    placeholder="e.g. EXPLABS_API_KEY"
+                    className="field font-mono"
+                  />
+                  <span className="text-micro text-t4">
+                    Names the Worker secret for this host. With it set, the key above can stay blank and nothing is stored in D1.
+                  </span>
+                </label>
               </div>
             </div>
           ))}

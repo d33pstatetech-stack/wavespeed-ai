@@ -28,6 +28,24 @@ bucket_name = "genai-assets"
 # without a code change — see docs/prompt-atlas-rollback.md.
 GUIDE_INJECTION = "1"
 WAVESPEED_BASE_URL = "https://api.wavespeed.ai/api/v3"
+# Secrets, set via .dev.vars locally or `wrangler secret put` per environment.
+# See .dev.vars.example for the full list with placeholders.
+#
+# The enhancer resolves each provider's key from the `apiKeyEnv` named on its
+# entry in src/worker.js DEFAULT_LLM_PROVIDERS — that field is what replaced the
+# old baseUrl.includes('venice.ai') sniff, which sent the OpenRouter key to every
+# host that was not literally venice.ai. Adding a provider means adding its
+# secret here too:
+#   WAVESPEED_API_KEY    - generation, polling, upload, stays server-side
+#   EXPLABS_API_KEY      - https://api.experientiallabs.ai/v1 (chain default, first)
+#   OPENROUTER_API_KEY   - https://openrouter.ai/api/v1
+#   VENICE_API_KEY       - https://api.venice.ai/api/v1
+#   HUGGINGFACE_API_KEY  - LoRA URL resolution against the Hub
+#   CIVITAI_API_KEY      - authenticated CivitAI model lookups
+#   JEV_API_KEY          - /api/judge proxy
+#   R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY - presigned GET URLs
+# An entry with no apiKeyEnv falls back to the legacy venice sniff, so llm_config
+# rows written before the field existed keep working.
 # R2 presigned URLs for cloud file picker (worker fetches nothing; provider pulls directly).
 # Secrets R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY via `wrangler secret put`.
 # R2_ACCOUNT_ID is an account identifier, not a credential, but it is still

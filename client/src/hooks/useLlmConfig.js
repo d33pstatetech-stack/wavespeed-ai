@@ -3,7 +3,10 @@ import { fetchLlmConfig, saveLlmConfig } from '../api';
 import { DEFAULT_LLM } from '../enhancer';
 
 const KEY = 'wavespeed_llm_config';
-const EMPTY_ROW = { baseUrl: 'https://openrouter.ai/api/v1', model: '', apiKey: '' };
+// Adding a row seeds the primary provider, matching the vanilla settings modal
+// in public/enhancer.js. `apiKeyEnv` is what authenticates the host on the
+// Worker; with an empty apiKey the env secret is used and no key is stored.
+const EMPTY_ROW = { provider: 'explabs', baseUrl: 'https://api.experientiallabs.ai/v1', model: 'glm-5.3-flash-abliterated', apiKey: '', apiKeyEnv: 'EXPLABS_API_KEY' };
 
 // LLM fallback-chain config: localStorage wins, backend as fallback/mirror.
 export default function useLlmConfig() {
