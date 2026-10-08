@@ -9,13 +9,16 @@
 //     picker's show-all is on.
 import { VERIFIED_LORA_RUNS } from './loras-data.js';
 
-// Central override (Phase A). App sets this from GET /api/loras/verifications
-// (filtered to app==='wavespeed', mapped to {lora, model, job, when}). When
-// non-empty the verified tier reads it FIRST; when absent/empty the baked
-// VERIFIED_LORA_RUNS is used unchanged, so behaviour is identical offline.
+// Central verifications (Phase A). App sets this from
+// GET /api/loras/verifications (filtered to app==='wavespeed', mapped to
+// {lora, model, job, when}). This table is ADDITIVE with the baked
+// VERIFIED_LORA_RUNS below, not a replacement for it: compatibility() probes
+// central first and falls back to the baked list, so a baked verified pair
+// never stops being verified because central data arrived. Absent/empty means
+// baked-only, so behaviour is identical offline.
 let centralVerified = null;
 export function setCentralVerified(rows) {
-  centralVerified = Array.isArray(rows) && rows.length ? rows : null;
+  centralVerified = Array.isArray(rows) ? rows : null;
 }
 export function getCentralVerified() {
   return centralVerified;
@@ -69,23 +72,30 @@ export function normName(s) {
    NOTE: flux is tested before krea — flux-krea-dev is FLUX architecture.
    ------------------------------------------------------------------ */
 // Which FLUX generation a name declares, as the digit the word "flux" is
-// immediately followed by — and only 1 or 2 count.
+// immediately followed by — and only 1, 2 or 3 count.
 //
-// Restricting it to [12] is the whole point. An earlier draft read the run of
-// digits after "flux" as the version, which mis-read `hyper-flux-16step` as
-// "FLUX 16", `fofr/flux-2004` as "FLUX 2004" and `igorriti/flux-360` as
-// "FLUX 360", then shipped ~20 real FLUX.1 finetunes to the FLUX.2 bucket and
-// hid every FLUX.1 adapter from every FLUX.2 model. Those are all step counts,
-// years and pixel counts, not generations. A real generation marker is a bare
-// `flux-1` / `flux-2`, and nothing else.
-const FLUX_GEN = /\bflux\s?v?([12])(?![0-9])/;
+// Restricting it to a bare single digit is the whole point. An earlier draft
+// read the run of digits after "flux" as the version, which mis-read
+// `hyper-flux-16step` as "FLUX 16", `fofr/flux-2004` as "FLUX 2004" and
+// `igorriti/flux-360` as "FLUX 360", then shipped ~20 real FLUX.1 finetunes to
+// the FLUX.2 bucket and hid every FLUX.1 adapter from every FLUX.2 model.
+// Those are all step counts, years and pixel counts, not generations.
+//
+// The `(?![0-9])` guard is what keeps those out now that 3 is recognised:
+// `flux-16step`, `flux-2004`, `flux-360` and `flux-3000-steps` all start with a
+// digit in [123] but continue, so they still carry no version at all and stay
+// FLUX.1. A real generation marker is a bare `flux-1` / `flux-2` / `flux-3`
+// and nothing else — `flux-1.1-pro` reads FLUX.1 via the same rule.
+const FLUX_GEN = /\bflux\s?v?([123])(?![0-9])/;
 
 function familyOf(raw) {
   const s = normName(raw);
   if (!s) return null;
   if (s.includes('flux')) {
     const m = FLUX_GEN.exec(s);
-    return m && m[1] === '2' ? 'FLUX.2' : 'FLUX.1';
+    // No version at all is FLUX.1: every versionless FLUX model in these
+    // catalogues is one. A recognised generation keeps its own bucket.
+    return m ? `FLUX.${m[1]}` : 'FLUX.1';
   }
   if (s.includes('qwen')) return 'Qwen-Image';
   if (s.includes('krea')) return 'Krea';
@@ -277,8 +287,16 @@ export function compatibility(lora, model, modelId) {
   if (!lora) return 'no';
   const lid = normName(lora.id);
   const mid = normName(modelId);
-  const verifiedTable = (centralVerified && centralVerified.length ? centralVerified : VERIFIED_LORA_RUNS) || [];
-  if (mid && verifiedTable.some((v) => normName(v.lora) === lid && normName(v.model) === mid)) {
+  // Central verifications first, baked VERIFIED_LORA_RUNS as a FALLBACK — the
+  // additive shape replicate already uses. The previous ternary REPLACED the
+  // table, so the moment /api/loras/verifications returned even one row every
+  // baked entry disappeared: a silent shrink of the verified tier with no
+  // error and no visible symptom. Both tables are probed, so a baked pair stays
+  // green whether or not central data is installed.
+  if (mid && centralVerified && centralVerified.some((v) => v && normName(v.lora) === lid && normName(v.model) === mid)) {
+    return 'verified';
+  }
+  if (mid && (VERIFIED_LORA_RUNS || []).some((v) => normName(v.lora) === lid && normName(v.model) === mid)) {
     return 'verified';
   }
   // K5: a user-rated 4-5 star run with this adapter loaded outranks every
