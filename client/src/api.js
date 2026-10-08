@@ -316,6 +316,19 @@ export async function fetchVerifications() {
   return Array.isArray(data.verifications) ? data.verifications : [];
 }
 
+// K5 — LoRA↔model pairs proven by 4-5★ rated runs in shared HISTORY.
+// Returns the whole payload ({min_runs, min_solo, pairs, norm, scanned});
+// setRunEvidence picks the rows the Worker already flagged green. Returns null
+// (not []) when the endpoint is missing or unreachable, so the caller can tell
+// "no evidence" from "empty evidence" — both of which leave behaviour as it was.
+export async function fetchLoraEvidence() {
+  const res = await fetch(`${API}/api/loras/evidence`);
+  const data = await json(res);
+  if (!res.ok) throw new Error(errText(data.error, `Evidence failed (${res.status})`));
+  if (!data || typeof data !== 'object' || (!Array.isArray(data.pairs) && !Array.isArray(data.norm))) return null;
+  return data;
+}
+
 // Jev structured-judgment pilot: verifier gate for enhancements (log-only).
 export const APP_NAME = 'wavespeed';
 

@@ -1018,6 +1018,21 @@ async function handleApiRoute(request, env, path, ctx) {
     }
   }
 
+  // ─── GET /api/loras/evidence — LoRA↔model pairs proven by 4-5★ rated runs ───
+  // Phase A read-only, additive. Derived from `runs` because runs.loras_json is a
+  // blob of URLs / owner-repo strings, not lora_library.id — no join key, no FK.
+  // A DB missing runs / lora_library / custom_loras answers empty, never 500.
+  if (path === '/api/loras/evidence' && request.method === 'GET') {
+    const hdb = histDB(env);
+    if (!hdb) return jsonResponse({ error: 'history DB not bound' }, 500);
+    try {
+      return jsonResponse(await buildLoraEvidence(hdb));
+    } catch (e) {
+      if (/no such table/i.test(String((e && e.message) || e))) return jsonResponse({ min_runs: EVIDENCE_MIN_RUNS, min_solo: EVIDENCE_MIN_SOLO, pairs: [], norm: [], scanned: {} });
+      throw e;
+    }
+  }
+
   // â”€â”€â”€ POST /api/enhance + /api/optimize â”€â”€â”€ (streaming, uncensored, fail-fast, single try per provider)
   if ((path === '/api/enhance' || path === '/api/optimize') && request.method === 'POST') {
     let body;
@@ -1858,6 +1873,296 @@ function customLoraToEntry(row) {
     triggers: Array.isArray(triggers) ? triggers : [],
     formats, note: row.version_note ? `Custom Â· ${row.version_note}` : 'Custom added from URL',
     suggested_target: '',
+  };
+}
+
+/* ------------------------------------------------------------------
+   K5 — LoRA ↔ model evidence derived from `runs`.
+
+   WHY NOT A JOIN. runs.loras_json is whatever `extractLoras()` scraped
+   out of the provider input — `{"lora_list":[{"path":"…","scale":1}]}`,
+   `{"extra_lora":"…"}`, `{"lora_weights":"…"}` — never a
+   lora_library.id. There is no lora_id column and no FK, so every
+   reference is normalised into a small set of candidate keys and matched
+   against the union of lora_library and custom_loras, normalised the
+   same way.
+
+   A reference that matches nothing is SKIPPED, never guessed at. An
+   unknown LoRA must not crash this endpoint, and it must never
+   manufacture a green.
+
+   NO WRITES. lora_verifications is deliberately left alone: it has no
+   rating column and it is re-seeded from the apps' loras-data.js by
+   scripts/seed-lora-library.mjs, so anything stored there would be
+   reverted by the next seed. Derive from `runs` instead.
+
+   evNorm() is the SAME rule as normName() in client/src/lora-compat.js
+   (K6). Duplicated rather than imported because the Worker and the
+   client are separate bundles, and it must stay in lockstep: both sides
+   build evidence keys with it.
+   ------------------------------------------------------------------ */
+
+// Minimum evidence for a pair to go green, and why.
+//
+// Two signals, and either one can veto. Both exist because a star rating
+// covers the WHOLE output — prompt, seed, composition, every adapter
+// stacked into the run — so "the user liked this output" is not the same
+// claim as "this adapter is what made it work".
+//
+//   MIN_RUNS = 2  One 4★ run is an anecdote. A rating is one sample of a
+//                stochastic pipeline and cannot separate "the adapter
+//                works" from "one good roll". Two independent 4-5★ runs is
+//                the smallest sample that survives that confound.
+//
+//   MIN_SOLO = 1  Attribution. If a pair was only ever run alongside other
+//                adapters, no run isolates it. Requiring at least one run
+//                where THIS adapter was the only one loaded is the clean
+//                signal.
+//
+//   MIN_STRONG_RUNS = 3 + MIN_STRONG_AVG = 4.5  The fallback for adapters
+//                that are never run alone. Three or more 4-5★ runs averaging
+//                at least 4.5 is a consistency claim that co-occurrence
+//                struggles to explain on its own, and it keeps the highest-
+//                volume evidence in the real DB (7 runs averaging 4.71) from
+//                being discarded purely for lacking a solo run.
+//
+// GREEN = runs >= MIN_RUNS AND (solo >= MIN_SOLO OR (runs >= MIN_STRONG_RUNS
+//        AND avg >= MIN_STRONG_AVG)).
+//
+// Requiring BOTH clean attribution and strong consensus would be simpler and
+// stricter, and on the real data it discards the single best-evidenced pair
+// there is. Requiring EITHER alone would promote a 2-run stack where one of
+// those runs rated 4★. This shape refuses both.
+//
+// Real shape at this threshold (39 rated 4-5★ runs carrying LoRAs, 44 refs,
+// all 44 resolved, 19 distinct pairs): 8 pairs green.
+const EVIDENCE_MIN_RUNS = 2;
+const EVIDENCE_MIN_SOLO = 1;
+const EVIDENCE_MIN_STRONG_RUNS = 3;
+const EVIDENCE_MIN_STRONG_AVG = 4.5;
+
+// One place, so `pairs` and `norm` can never disagree about what is green.
+function evIsGreen(runs, solo, avg) {
+  if (runs < EVIDENCE_MIN_RUNS) return false;
+  if (solo >= EVIDENCE_MIN_SOLO) return true;
+  return runs >= EVIDENCE_MIN_STRONG_RUNS && avg >= EVIDENCE_MIN_STRONG_AVG;
+}
+
+// Same rule as normName() in client/src/lora-compat.js. Lowercase, then
+// collapse every run of `.`, `-`, `_` and whitespace into a SINGLE space.
+// Collapsed, not deleted — deleting would glue genuinely distinct tokens
+// together, which is exactly the false positive this must not produce.
+function evNorm(s) {
+  return String(s ?? '')
+    .toLowerCase()
+    .replace(/[.\-_\s]+/g, ' ')
+    .trim();
+}
+
+// Replicate pins a version into runs.model (`owner/repo:<64 hex>`) while
+// the catalogue stores `owner/repo`. Strip the pin so the exact key can
+// ever match a catalogue id.
+function evModelId(model) {
+  return String(model || '').replace(/:[0-9a-f]{32,}$/i, '').trim();
+}
+
+// Last path segment — the cross-provider key. `wavespeed-ai/flux-dev-lora`
+// and `black-forest-labs/flux-dev-lora` are one base model reached through
+// two providers, and only the leaf says so. The client gates any transfer
+// through it on the evidence model and the candidate model naming the same
+// family, so a stripped prefix can widen reach but never cross families.
+//
+// One extra step on top of evNorm: split a letter that runs straight into a
+// digit (`flux2` -> `flux 2`, `klein9b` -> `klein 9b`). evNorm folds
+// SEPARATORS, so `flux-2-klein-9b` already reads `flux 2 klein 9b` while the
+// equally valid glued spelling `flux2_klein_9b` would read `flux2 klein 9b`
+// and never meet it. Applied ONLY here, never to identity comparisons, and
+// the result is still family-gated downstream — `flux1dev` stays
+// `flux 1dev` and shares no key with `flux 2 klein 9b`.
+function evModelLeaf(model) {
+  const parts = evModelId(model).split('/');
+  const leaf = parts[parts.length - 1] || '';
+  return evNorm(leaf).replace(/([a-z])(\d)/g, '$1 $2');
+}
+
+// Candidate keys one extracted reference can answer to. Deliberately small
+// and deliberately lossy-at-the-edges: only shapes that actually occur in
+// runs.loras_json get a rule.
+function evRefKeys(ref) {
+  const raw = String(ref ?? '').trim();
+  if (!raw) return [];
+  const keys = [];
+  const add = (s) => { const k = evNorm(s); if (k && !keys.includes(k)) keys.push(k); };
+  add(raw);
+  const bare = raw.replace(/^https?:\/\//i, '');
+  // huggingface.co/OWNER/REPO/(resolve|blob)/REF/FILE
+  const hf = /^huggingface\.co\/([^/]+)\/([^/]+)(?:\/(?:resolve|blob)\/[^/]*\/([^/?#]+))?/i.exec(bare);
+  if (hf) {
+    add(`${hf[1]}/${hf[2]}`);
+    if (hf[3]) add(hf[3]);
+  }
+  // civitai.com/api/download/models/<versionId>[?fileId=…] and /models/<id>
+  const civ = /civitai\.com\/api\/download\/models\/(\d+)/i.exec(bare);
+  if (civ) add(`civitai:${civ[1]}`);
+  const civPage = /civitai\.com\/models\/(\d+)/i.exec(bare);
+  if (civPage) add(`civitai:${civPage[1]}`);
+  const civShort = /^civitai:(\d+)/i.exec(raw);
+  if (civShort) add(`civitai:${civShort[1]}`);
+  return keys;
+}
+
+// String leaves of a loras_json blob. Numeric `*scale` / `*weight*` fields
+// are numbers, not references, and `{"lora_scale":1,"extra_lora_scale":1}`
+// (a run that used the model's baked-in adapter) must yield nothing at all.
+function evRefStrings(v, out = [], depth = 0) {
+  if (v == null || depth > 4) return out;
+  if (typeof v === 'string') { if (v.trim()) out.push(v); return out; }
+  if (Array.isArray(v)) { for (const x of v) evRefStrings(x, out, depth + 1); return out; }
+  if (typeof v === 'object') {
+    for (const [k, x] of Object.entries(v)) {
+      if (/scale|weight|strength/i.test(k) && typeof x === 'number') continue;
+      evRefStrings(x, out, depth + 1);
+    }
+  }
+  return out;
+}
+
+function evHasOutput(row) {
+  const empty = (v) => !v || /^(\[\]|\{\}|null|"")$/.test(String(v).trim());
+  return !empty(row.output_urls_json) || !empty(row.r2_keys_json);
+}
+
+function evIsFinished(status) {
+  return !/fail|cancel|error/i.test(String(status || ''));
+}
+
+// Read, tolerating absent tables: each query degrades to [] on its own so a
+// pre-migration DB gets an empty 200 rather than a 500 or a half-answer.
+async function evAll(hdb, sql) {
+  try {
+    const r = await hdb.prepare(sql).all();
+    return r.results || [];
+  } catch (e) {
+    if (/no such table/i.test(String((e && e.message) || e))) return [];
+    throw e;
+  }
+}
+
+async function buildLoraEvidence(hdb) {
+  const [lib, cus, runs] = await Promise.all([
+    evAll(hdb, 'SELECT id, repo, file, file_url, file_url_muapi, file_url_replicate, file_url_wavespeed FROM lora_library'),
+    evAll(hdb, 'SELECT id, source, repo, file, repo_url, file_url FROM custom_loras'),
+    evAll(hdb, 'SELECT model, loras_json, rating, status, output_urls_json, r2_keys_json FROM runs WHERE rating >= 4'),
+  ]);
+
+  // alias -> canonical lora id. First writer wins; an alias claimed by two
+  // different LoRAs is poisoned so it can never resolve to a guess.
+  const alias = new Map();
+  const claim = (key, id) => {
+    const k = evNorm(key);
+    if (!k) return;
+    const prev = alias.get(k);
+    if (prev === undefined) alias.set(k, id);
+    else if (prev !== id) alias.set(k, null);
+  };
+  for (const r of lib) {
+    const id = String(r.id || r.repo || '');
+    if (!id) continue;
+    claim(r.id, id); claim(r.repo, id); claim(r.file, id); claim(r.file_url, id);
+    claim(r.file_url_muapi, id); claim(r.file_url_replicate, id); claim(r.file_url_wavespeed, id);
+  }
+  for (const r of cus) {
+    const id = `custom:${r.id}`;
+    claim(r.repo, id); claim(r.file, id); claim(r.repo_url, id); claim(r.file_url, id);
+    if (r.source === 'civitai' && r.repo) claim(`civitai:${r.repo}`, id);
+  }
+
+  const exact = new Map();   // `loraId\tmodelId`
+  const leaf = new Map();    // `loraId\tmodelLeaf`
+  const bucket = (map, key, rating, solo, modelNorm) => {
+    const b = map.get(key) || { runs: 0, sum: 0, solo: 0, models: new Set() };
+    b.runs += 1; b.sum += rating; if (solo) b.solo += 1;
+    if (modelNorm) b.models.add(modelNorm);
+    map.set(key, b);
+  };
+
+  let scanned = 0; let produced = 0; let withLora = 0; let refs = 0; let refsResolved = 0;
+
+  for (const r of runs) {
+    scanned += 1;
+    if (!(Number(r.rating) >= 4)) continue;
+    if (!r.loras_json || r.loras_json === '{}' || r.loras_json === 'null') continue;
+    withLora += 1;
+    if (!evHasOutput(r) || !evIsFinished(r.status)) continue;
+    produced += 1;
+
+    let blob = null;
+    try { blob = JSON.parse(r.loras_json); } catch { blob = null; }
+    if (!blob) continue;
+    const strings = evRefStrings(blob);
+    if (!strings.length) continue;
+
+    const modelId = evModelId(r.model);
+    const modelNorm = evNorm(modelId);
+    const modelLeaf = evNorm(evModelLeaf(modelId));
+    const ids = new Set();
+    for (const ref of strings) {
+      refs += 1;
+      const hit = evRefKeys(ref).map((k) => alias.get(k)).find((x) => x != null);
+      if (hit) { ids.add(hit); refsResolved += 1; }
+    }
+    const solo = ids.size === 1;
+    for (const id of ids) {
+      // Keys are NORMALISED, and so is every id this endpoint returns. The
+      // client probes with normName()'d values, so bucketing on raw ids would
+      // mean the two sides could never agree. normName is idempotent, so the
+      // client re-normalising on install is a no-op, not a second opinion.
+      const nid = evNorm(id);
+      if (!nid) continue;
+      bucket(exact, `${nid}\t${modelNorm}`, Number(r.rating), solo, modelNorm);
+      if (modelLeaf) bucket(leaf, `${nid}\t${modelLeaf}`, Number(r.rating), solo, modelNorm);
+    }
+  }
+
+  const pairs = [...exact.entries()].map(([key, b]) => {
+    const [lora_id, model] = key.split('\t');
+    return {
+      lora_id, model,
+      runs: b.runs, solo_runs: b.solo,
+      avg_rating: Math.round((b.sum / b.runs) * 100) / 100,
+      green: evIsGreen(b.runs, b.solo, b.sum / b.runs),
+    };
+  }).sort((a, b) => b.runs - a.runs || a.lora_id.localeCompare(b.lora_id));
+
+  const norm = [...leaf.entries()].map(([key, b]) => {
+    const [lora_id, model_leaf] = key.split('\t');
+    return {
+      lora_id, model_leaf,
+      // Full normalised model ids behind this leaf. The client checks the
+      // FAMILY of these against the candidate model before honouring a
+      // transfer — the leaf alone loses tokens (`…/qwen-image/text-to-image-lora`
+      // has no "qwen" in the leaf) and would be unsafe to gate on alone.
+      models: [...b.models].sort(),
+      runs: b.runs, solo_runs: b.solo,
+      avg_rating: Math.round((b.sum / b.runs) * 100) / 100,
+      green: evIsGreen(b.runs, b.solo, b.sum / b.runs),
+    };
+  }).sort((a, b) => b.runs - a.runs || a.lora_id.localeCompare(b.lora_id));
+
+  return {
+    min_runs: EVIDENCE_MIN_RUNS,
+    min_solo: EVIDENCE_MIN_SOLO,
+    pairs,
+    norm,
+    scanned: {
+      runs_rated_4_plus: scanned,
+      runs_with_loras: withLora,
+      runs_produced_output: produced,
+      refs_seen: refs,
+      refs_resolved: refsResolved,
+      pairs: pairs.length,
+      pairs_green: pairs.filter((p) => p.green).length,
+    },
   };
 }
 

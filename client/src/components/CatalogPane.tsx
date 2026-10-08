@@ -2,7 +2,7 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 import Icon from "../ui/Icon";
 import { Badge, EmptyState, ModelName, Segmented, TierBadge } from "../ui/primitives";
 import { useDebounced, useVirtualRows } from "../lib/hooks";
-import { tierFor } from "../lib/tiers";
+import { tierEvidence, tierFor } from "../lib/tiers";
 import type { Group, Lora, Model } from "../lib/types";
 
 const ROW = 60;
@@ -44,6 +44,18 @@ export default function CatalogPane({
     const m = new Map<string, ReturnType<typeof tierFor>>();
     if (!pinning) return m;
     for (const mo of models) m.set(mo.id, tierFor(mo, pinnedLoras));
+    return m;
+  }, [models, pinnedLoras, pinning]);
+
+  // K5: the rated-run counts behind each green badge, so the badge can say
+  // why instead of silently turning green. Null/empty -> renders as before.
+  const evidence = useMemo(() => {
+    const m = new Map<string, { runs: number; avg_rating: number; leaf: boolean }>();
+    if (!pinning) return m;
+    for (const mo of models) {
+      const ev = tierEvidence(mo, pinnedLoras);
+      if (ev) m.set(mo.id, ev);
+    }
     return m;
   }, [models, pinnedLoras, pinning]);
 
@@ -240,7 +252,7 @@ export default function CatalogPane({
                   style={{ top: index * ROW, height: ROW - 4 }}
                 >
                   <div className="flex items-center gap-2">
-                    {pinning && tier && <TierBadge tier={tier} compact />}
+                    {pinning && tier && <TierBadge tier={tier} compact evidence={evidence.get(m.id)} />}
                     <ModelName name={m.name} className="min-w-0 flex-1 text-fine font-medium text-t1" />
                     <span className="tnum shrink-0 text-micro font-semibold text-t2">
                       {m.cost > 0 ? `$${m.cost.toFixed(3)}` : "Free"}

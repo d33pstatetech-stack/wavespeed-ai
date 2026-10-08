@@ -5,7 +5,7 @@ import { useToast } from "../ui/Toasts";
 import { resolveLoraUrl } from "../lib/api";
 import { insertFormat, isConfirmed } from "../lib/loraFormats";
 import type { App } from "../lib/loraFormats";
-import { tierForOne } from "../lib/tiers";
+import { tierEvidenceOne, tierForOne } from "../lib/tiers";
 import type { Lora, Model } from "../lib/types";
 
 type Group_ = "all" | "aznten" | "misc" | "nsfw" | "confirmed";
@@ -244,7 +244,7 @@ export default function LoraDialog({
                         Confirmed
                       </Badge>
                     ) : (
-                      tier && <TierBadge tier={tier} />
+                      tier && <TierBadge tier={tier} evidence={tierEvidenceOne(model, l)} />
                     )}
                     <Badge tone="neutral">
                       {l.source === "civitai" ? "CivitAI" : l.source === "custom" ? "Custom" : "HF"}

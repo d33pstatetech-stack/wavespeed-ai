@@ -13,16 +13,38 @@ const TIER = {
   unsupported: { label: "Unsupported", glyph: "✕", cls: "text-crit bg-crit/12 ring-crit/30" },
 } as const;
 
-export function TierBadge({ tier, compact = false }: { tier: Tier; compact?: boolean }) {
+export function TierBadge({
+  tier,
+  compact = false,
+  evidence = null,
+}: {
+  tier: Tier;
+  compact?: boolean;
+  /* K5: the `runs` / `avg_rating` behind a green badge, so a badge that got
+     recoloured by rated-run evidence can always say WHY. Omitted everywhere
+     else, and ignored for any non-green tier, so this renders byte-identically
+     when no evidence is installed. */
+  evidence?: { runs: number; avg_rating: number; leaf?: boolean } | null;
+}) {
   const t = TIER[tier];
+  // Only ever attached to a green badge — evidence can never relabel amber/red.
+  const ev = tier === "verified" ? evidence : null;
+  const evText = ev
+    ? ` ${ev.runs} rated run${ev.runs === 1 ? "" : "s"}, ${ev.avg_rating.toFixed(1)} stars on average${ev.leaf ? ", on an equivalent model at another provider" : ""}`
+    : "";
   return (
     <span
       className={`inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-micro font-semibold leading-none ring-1 ${t.cls}`}
     >
       <span aria-hidden="true">{t.glyph}</span>
       {!compact && t.label}
+      {!compact && ev && (
+        <span aria-hidden="true" className="tnum font-normal opacity-80">
+          {ev.runs}×{ev.avg_rating.toFixed(1)}★
+        </span>
+      )}
       <span className="sr-only">
-        {t.label} compatibility with the pinned adapters
+        {t.label} compatibility with the pinned adapters{evText}
       </span>
     </span>
   );
