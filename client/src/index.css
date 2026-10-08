@@ -374,16 +374,25 @@ body {
   }
 }
 
-/* Native popover resets — top layer, light dismiss, no UA chrome */
-[popover] {
-  margin: 0;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  overflow: visible;
-}
-[popover]::backdrop {
-  background: transparent;
+/* Native popover resets — top layer, light dismiss, no UA chrome.
+   This MUST stay inside @layer base. Tailwind emits its utilities in
+   @layer utilities, and unlayered CSS outranks every layer regardless of
+   specificity — an unlayered `background: transparent` here silently killed
+   the `bg-*` and `p-*` utilities on the Tooltip panel, leaving the popup
+   unfilled and unpadded on top of the page text. */
+@layer base {
+  [popover] {
+    margin: 0;
+    border: 0;
+    /* Opaque fallback fill only. The panel's `bg-s2/95` utility still wins
+       (utilities layer), so this is just insurance for the one popover we
+       have: text stays legible even if the token path fails. */
+    background-color: var(--color-s2);
+    overflow: visible;
+  }
+  [popover]::backdrop {
+    background: transparent;
+  }
 }
 
 dialog::backdrop {

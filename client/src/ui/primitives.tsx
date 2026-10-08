@@ -199,7 +199,7 @@ export function Tip({ text, label = "More information" }: { text: string; label?
         id={id}
         popover="auto"
         role="tooltip"
-        className="fixed z-[90] max-w-[min(34ch,calc(100vw-1.5rem))] rounded-xl bg-s2 px-3 py-2.5 text-fine leading-relaxed text-t1 shadow-e3 ring-1 ring-line2"
+        className="fixed z-[90] max-w-[min(34ch,calc(100vw-1.5rem))] rounded-xl bg-s2/95 px-3 py-2.5 text-fine leading-relaxed text-t1 shadow-e3 ring-1 ring-line2 backdrop-blur-sm"
         style={pos ? { top: pos.top, left: pos.left } : { top: 0, left: 0, visibility: "hidden" }}
       >
         {shaped ? (
