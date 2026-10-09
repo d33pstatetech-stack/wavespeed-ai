@@ -28,7 +28,7 @@ import { setCentralVerified, setRunEvidence } from "./lora-compat";
 import { useMediaQuery, usePersistentState } from "./lib/hooks";
 import { USER_LORAS, NSFW_LORAS, isAzntenLora } from "./loras-data";
 import { buildSubmitParams } from "./params";
-import { rateJob } from "./api";
+import { rateJob, saveOutputs } from "./api";
 import type { Job, Lora, Model, ModelSchema, Run } from "./lib/types";
 
 type Tab = "models" | "compose" | "results";
@@ -407,6 +407,22 @@ function Console() {
       );
       if (document.hidden && "Notification" in window && Notification.permission === "granted") {
         new Notification("Generation complete", { body: model.name });
+      }
+      // Fire-and-forget R2 auto-archive (provider CDN URLs expire): restores
+      // the pre-redesign ArchiveReporter. Toast only on failure.
+      const archiveUrls = (r.outputs || []).filter((u) => typeof u === "string" && /^https?:\/\//.test(u)).slice(0, 10);
+      if (archiveUrls.length) {
+        saveOutputs({ urls: archiveUrls, model: model.id, jobId: r.requestId }).then(
+          (j: any) => {
+            if (!(j?.saved || []).length) {
+              const firstErr = j?.errors?.[0]?.error
+                ? String(j.errors[0].error).slice(0, 160)
+                : "CDN link will expire!";
+              toast("R2 auto-archive failed", "error", firstErr);
+            }
+          },
+          () => toast("R2 auto-archive failed", "error", "CDN link will expire!"),
+        );
       }
     } catch (e) {
       if ((e as Error).name === "AbortError") {

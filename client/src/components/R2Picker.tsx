@@ -98,7 +98,7 @@ export default function R2Picker({
       open={open}
       onClose={onClose}
       title="Pick from R2"
-      description="Previously uploaded images. Picking resolves a provider-fetchable URL into the field."
+      description="Uploads plus auto-archived generations (under provider/date folders — try Flat view). Picking resolves a provider-fetchable URL into the field."
       size="lg"
       footer={
         <>
@@ -159,19 +159,32 @@ export default function R2Picker({
           </label>
         </div>
 
-        <div className="relative">
-          <Icon
-            name="search"
-            className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-t3"
-          />
-          <input
-            type="search"
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            placeholder="Filter by filename…"
-            aria-label="Filter images by filename"
-            className="field pl-9"
-          />
+        <div className="flex items-center gap-2">
+          <div className="relative flex-1">
+            <Icon
+              name="search"
+              className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-t3"
+            />
+            <input
+              type="search"
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              placeholder="Filter by filename…"
+              aria-label="Filter images by filename"
+              className="field pl-9"
+            />
+          </div>
+          <button
+            type="button"
+            onClick={() => load(prefix, flat, null, false)}
+            disabled={loading}
+            className="btn btn-sm btn-quiet shrink-0 gap-1.5"
+            title="Reload the R2 listing"
+            aria-label="Refresh R2 listing"
+          >
+            <Icon name="refresh" className={`size-4 ${loading ? "animate-spin" : ""}`} />
+            Refresh
+          </button>
         </div>
 
         {error && (
