@@ -3,6 +3,7 @@ import Icon from "../ui/Icon";
 import { Badge, Tip } from "../ui/primitives";
 import { uploadFileBlob } from "../api";
 import { getParamType, isLoraParam, loraSlotCount, loraTokenIssues, prettyLabel, sortParamEntries, TIER_B_LORA_PARAM, tierBLoraPayload } from "../params";
+import { usePersistentState } from "../lib/hooks";
 import type { ModelSchema, ParamSpec } from "../lib/types";
 import type { TierBLora } from "../lib/models";
 
@@ -386,14 +387,18 @@ export default function ParamForm({
     });
 
   /* The opt-in is component state, not schema state, so it resets whenever the
-     schema changes — i.e. whenever the user picks a different model. */
-  const [tierBState, setTierBState] = useState({ optIn: false, token: "" });
-  useEffect(() => setTierBState({ optIn: false, token: "" }), [schema]);
+     schema changes — i.e. whenever the user picks a different model. The
+     token (a LoRA reference, not a secret) persists per device so a working
+     value survives model-hopping; nothing is sent until the box is ticked. */
+  const [tierBOptIn, setTierBOptIn] = useState(false);
+  const [tierBToken, setTierBToken] = usePersistentState<string>("wavespeed_tierb_token", "");
+  useEffect(() => setTierBOptIn(false), [schema]);
 
   /* tierBLoraPayload is the gate: an unticked box yields `{}`, so `set` is
      called with undefined and the key is removed from `values`. */
   const commitTierB = (next: { optIn: boolean; token: string }) => {
-    setTierBState(next);
+    setTierBOptIn(next.optIn);
+    setTierBToken(next.token);
     set(TIER_B_LORA_PARAM, tierBLoraPayload(next)[TIER_B_LORA_PARAM]);
   };
 
@@ -414,7 +419,7 @@ export default function ParamForm({
           <Field key={name} name={name} spec={spec} value={values[name]} onSet={(v) => set(name, v)} />
         ))}
         {tierB && (
-          <TierBLoraField tierB={tierB} optIn={tierBState.optIn} token={tierBState.token} onChange={commitTierB} />
+          <TierBLoraField tierB={tierB} optIn={tierBOptIn} token={tierBToken} onChange={commitTierB} />
         )}
       </div>
     </div>

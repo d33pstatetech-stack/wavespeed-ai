@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import Icon from "../ui/Icon";
 import { Badge, Dialog, EmptyState, Segmented, TierBadge, Tip } from "../ui/primitives";
 import { useToast } from "../ui/Toasts";
@@ -36,6 +36,13 @@ export default function LoraDialog({
   const [url, setUrl] = useState("");
   const [nameOverride, setNameOverride] = useState("");
   const [adding, setAdding] = useState(false);
+  /* Inline outcome of the last Resolve click — toasts auto-dismiss, this
+     stays, so every attempt ends in a visible confirmation or error. */
+  const [status, setStatus] = useState<{ kind: "idle" | "working" | "ok" | "error"; text: string }>({
+    kind: "idle",
+    text: "",
+  });
+  const abortRef = useRef<AbortController | null>(null);
   const [group, setGroup] = useState<Group_>("all");
 
   const counts = useMemo(
@@ -87,40 +94,60 @@ export default function LoraDialog({
   async function resolve() {
     const raw = url.trim();
     if (!raw) return;
+    abortRef.current?.abort();
+    const ac = new AbortController();
+    abortRef.current = ac;
     const u = /:\/\//.test(raw) ? raw : `https://${raw}`;
     const customName = nameOverride.trim();
     setAdding(true);
+    setStatus({ kind: "working", text: `Resolving ${u} — reading the model card…` });
     try {
-      const res: any = await resolveLoraUrl(u);
+      const res: any = await resolveLoraUrl(u, { signal: ac.signal });
       const found: any[] = Array.isArray(res) ? res : res.loras || res.entries || (res.repo ? [res] : []);
       if (!found.length) throw new Error("No LoRA found at that address");
+      const added: string[] = [];
       for (const f of found) {
         const name = customName || f.name || f.repo || u;
         const fmt = insertFormat(app, { ...f, name });
         await onAddCustom({
           id: String(f.id || f.file_url || f.repo || u),
           name,
-          source: f.source === "direct" ? "custom" : /civitai/i.test(u) ? "civitai" : "huggingface",
+          source: /civitai/i.test(u) ? "civitai" : f.source === "direct" ? "custom" : "huggingface",
           repo: String(f.repo || f.id || u),
           baseFamily: "",
           triggers: Array.isArray(f.triggers) ? f.triggers : [],
           custom: true,
           entry: { ...f, name },
         });
+        added.push(name);
         if (fmt) {
           toast(`Added ${name}`, "success", `Paste this into the field: ${fmt.value}`);
         }
       }
       setUrl("");
       setNameOverride("");
+      setStatus({
+        kind: "ok",
+        text: `Added ${added.join(", ")} — find it in the list below, pin it, or copy its value into a LoRA field.`,
+      });
       toast(`Added ${found.length} adapter${found.length === 1 ? "" : "s"}`, "success");
     } catch (e) {
       const msg = (e as Error).message || "";
-      if (/timed out|timeout|aborted|abort/i.test(msg)) toast("Resolve timed out", "error", msg);
-      else toast("Could not resolve that URL", "error", msg);
+      if (ac.signal.aborted) {
+        setStatus({ kind: "error", text: "Resolve cancelled — nothing was added." });
+      } else {
+        setStatus({ kind: "error", text: msg });
+        if (/timed out|timeout|aborted|abort/i.test(msg)) toast("Resolve timed out", "error", msg);
+        else toast("Could not resolve that URL", "error", msg);
+      }
     } finally {
       setAdding(false);
+      if (abortRef.current === ac) abortRef.current = null;
     }
+  }
+
+  function cancelResolve() {
+    abortRef.current?.abort();
   }
 
   return (
@@ -172,7 +199,26 @@ export default function LoraDialog({
               {adding ? <Icon name="refresh" className="size-4" /> : <Icon name="plus" className="size-4" />}
               {adding ? "Resolving…" : "Resolve"}
             </button>
+            {adding && (
+              <button type="button" onClick={cancelResolve} className="btn btn-quiet gap-2">
+                Cancel
+              </button>
+            )}
           </div>
+          {status.kind !== "idle" && (
+            <p
+              role="status"
+              className={`mt-2 rounded-lg px-2.5 py-1.5 text-micro ring-1 ${
+                status.kind === "ok"
+                  ? "bg-pass/10 text-t1 ring-pass/30"
+                  : status.kind === "error"
+                    ? "bg-crit/10 text-crit ring-crit/30"
+                    : "bg-s1 text-t2 ring-line"
+              }`}
+            >
+              {status.text}
+            </p>
+          )}
           {ephemeralHost && (
             <p className="mt-2 rounded-lg bg-warn/10 px-2.5 py-1.5 text-micro text-warn ring-1 ring-warn/25">
               Temporary CDN links expire — upload to HuggingFace for a permanent entry

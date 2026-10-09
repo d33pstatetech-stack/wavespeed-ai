@@ -431,8 +431,18 @@ function Console() {
       const taggedEntry = tagCustomEntry({ ...(l.entry || {}), name: l.name, id: l.id });
       const tagged: Lora = { ...l, entry: taggedEntry };
       setLibrary((ls) => [tagged, ...ls.filter((x) => x.id !== tagged.id)]);
+      // The D1 validator speaks hf/civitai/direct; the UI badge speaks
+      // huggingface/civitai/custom. Translate at the save boundary, otherwise
+      // a resolved adapter is accepted locally but rejected by the server and
+      // silently lost on the next refresh.
+      const src = String((tagged.entry as any)?.source || "");
+      const serverSource = src === "custom" ? "direct" : src === "huggingface" ? "hf" : src || "direct";
       try {
-        await saveCustomLora(tagged.entry || { repo: tagged.repo, name: tagged.name });
+        const saved: any = await saveCustomLora({
+          ...((tagged.entry as any) || { repo: tagged.repo, name: tagged.name }),
+          source: serverSource,
+        });
+        if (saved && saved.deduplicated) toast(`Already in your library: ${tagged.name}`, "info");
       } catch (e) {
         toast("Saved locally, but the server rejected it", "error", (e as Error).message);
       }
@@ -472,13 +482,19 @@ function Console() {
   }, [runs, setRuns, toastUndo]);
 
   /* Ratings are real and server-side, so the average feeds back into the
-     catalogue's "most used" and star display on the next load. */
+     catalogue's "most used" and star display on the next load. Server-first:
+     the star only sticks when the POST lands, and a failure toasts instead
+     of silently diverging from the server (which would starve K5 evidence). */
   const rate = useCallback(
-    (id: string, n: number) => {
-      setRuns((rs) => rs.map((r) => (r.id === id ? { ...r, rating: n } : r)));
-      rateJob({ externalJobId: id, rating: n }).catch(() => {});
+    async (id: string, n: number) => {
+      try {
+        await rateJob({ externalJobId: id, rating: n });
+        setRuns((rs) => rs.map((r) => (r.id === id ? { ...r, rating: n } : r)));
+      } catch (e) {
+        toast("Rating not saved", "error", (e as Error).message);
+      }
     },
-    [setRuns],
+    [setRuns, toast],
   );
 
   const reuse = useCallback(

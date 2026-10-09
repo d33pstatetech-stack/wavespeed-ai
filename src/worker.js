@@ -1773,8 +1773,26 @@ async function resolveHuggingFace(owner, repo, env) {
   };
 }
 
-async function resolveCivitai(modelId, versionId, env) {
-  const data = await fetchJsonUpstream(`https://civitai.com/api/v1/models/${modelId}`, env);
+async function resolveCivitai(modelId, versionId, env, mirrorHost = null) {
+  // Primary metadata lives on civitai.com, but a model reached through a
+  // mirror (civitai.red serves the NSFW catalogue) may be absent there — fall
+  // back to the mirror's own API copy on failure only.
+  let data = null;
+  let lastErr = null;
+  try {
+    data = await fetchJsonUpstream(`https://civitai.com/api/v1/models/${modelId}`, env);
+  } catch (e) {
+    lastErr = e;
+  }
+  const mirror = String(mirrorHost || '').toLowerCase();
+  if (!data && mirror && mirror !== 'civitai.com') {
+    try {
+      data = await fetchJsonUpstream(`https://${mirror}/api/v1/models/${modelId}`, env, 15000);
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  if (!data) throw lastErr;
   if (data.type && data.type !== 'LORA') throw new Error(`Upstream type is ${data.type}, not a LoRA`);
   const versions = Array.isArray(data.modelVersions) ? data.modelVersions.filter((v) => v.status === 'Published' || v.status === undefined) : [];
   if (!versions.length) throw new Error('No published versions found');
@@ -1786,7 +1804,7 @@ async function resolveCivitai(modelId, versionId, env) {
   const primary = models.find((f) => f.primary) || models[0];
   const warnings = [];
   if (data.nsfw) warnings.push('Flagged NSFW upstream â€” belongs in the NSFW picker.');
-  const repoUrl = `https://civitai.com/models/${data.id}`;
+  const repoUrl = `https://${mirror && mirror !== 'civitai.com' ? mirror : 'civitai.com'}/models/${data.id}`;
   const fileUrl = primary.downloadUrl;
   return {
     source: 'civitai', repo: String(data.id), name: data.name || `civitai-${data.id}`,
@@ -1805,6 +1823,48 @@ async function resolveCivitai(modelId, versionId, env) {
   };
 }
 
+async function resolveCivitaiDownload(url, versionId, env) {
+  // A shared CivitAI download link (civitai.com or a mirror like civitai.red)
+  // serves the weight bytes directly but carries no metadata: probe the bytes
+  // with a ranged GET, then file it as a direct entry. Downstream formatting
+  // keys off /civitai/i, so this gets exactly the same accepted values as a
+  // regular CivitAI resolve. The filename comes from Content-Disposition.
+  let normalized = String(url || '').trim();
+  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(normalized)) normalized = 'https://' + normalized;
+  let host = 'civitai';
+  try { host = new URL(normalized).hostname; } catch { /* keep */ }
+  const ctrl = new AbortController();
+  const to = setTimeout(() => ctrl.abort(), 20000);
+  let filename = '';
+  try {
+    const res = await fetch(normalized, { method: 'GET', headers: { Range: 'bytes=0-1023', 'User-Agent': LORA_UA }, signal: ctrl.signal });
+    if (res.status !== 200 && res.status !== 206) throw new Error(`${host} download link unreachable or expired (re-open the model page and copy a fresh link)`);
+    const cd = res.headers.get('content-disposition') || '';
+    const fm = /filename\*?=(?:UTF-8''|")?([^";]+)/i.exec(cd);
+    if (fm) {
+      try { filename = decodeURIComponent(fm[1].replace(/"$/, '')); } catch { filename = fm[1]; }
+    }
+    try { await res.arrayBuffer(); } catch { /* ignore body errors */ }
+  } catch (e) {
+    const msg = String((e && e.message) || '');
+    if (msg.includes('unreachable or expired')) throw e;
+    throw new Error(`${host} download link unreachable or expired (re-open the model page and copy a fresh link)`);
+  } finally {
+    clearTimeout(to);
+  }
+  if (filename && !/\.safetensors$/i.test(filename)) filename = '';
+  const file = filename || `civitai-${versionId}.safetensors`;
+  const name = file.replace(/\.safetensors$/i, '');
+  return {
+    source: 'direct', repo: `civitai:${versionId}`, name,
+    file, file_name: file, file_url: normalized, repo_url: normalized,
+    triggers: [], base_model: '', pipeline: 'text-to-image', nsfw: false,
+    candidates: [{ file, file_url: normalized, recommended: true }],
+    formats: { muapi: normalized, replicate: normalized, wavespeed: normalized },
+    version_note: `CivitAI download link (version ${versionId}) — verify the weights before use`,
+  };
+}
+
 async function resolveLoraUrl(url, env) {
   const u = String(url || '').trim();
   let m = u.match(/huggingface\.co\/([^/\s?#]+)\/([^/\s?#]+)/i);
@@ -1812,11 +1872,18 @@ async function resolveLoraUrl(url, env) {
   m = u.match(/civitai\.[a-z]{2,6}\/models\/(\d+)/i);
   if (m) {
     let ver = null;
-    try { ver = new URL(u).searchParams.get('modelVersionId'); } catch { /* ignore */ }
-    return resolveCivitai(m[1], ver, env);
+    let host = null;
+    try {
+      const parsed = new URL(/:\/\//.test(u) ? u : `https://${u}`);
+      ver = parsed.searchParams.get('modelVersionId');
+      host = parsed.hostname;
+    } catch { /* ignore */ }
+    return resolveCivitai(m[1], ver, env, host);
   }
   m = u.match(/^civitai:(\d+)(?:@(\d+))?$/i);
   if (m) return resolveCivitai(m[1], m[2] || null, env);
+  m = u.match(/civitai\.[a-z]{2,6}\/api\/download\/models\/(\d+)/i);
+  if (m) return resolveCivitaiDownload(u, m[1], env);
   // Direct .safetensors file on any host (temporary CDN links included).
   let normalized = u;
   if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(normalized)) normalized = 'https://' + normalized;

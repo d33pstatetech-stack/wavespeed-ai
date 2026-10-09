@@ -31,7 +31,7 @@ export default function CatalogPane({
 }) {
   const [group, setGroup] = useState<Group | "all">("all");
   const [raw, setRaw] = useState("");
-  const [sort, setSort] = useState<"popular" | "name" | "cost">("popular");
+  const [sort, setSort] = useState<"popular" | "rated" | "name" | "cost">("popular");
   const [showIncompatible, setShowIncompatible] = useState(false);
   const [active, setActive] = useState(0);
 
@@ -76,6 +76,11 @@ export default function CatalogPane({
     }
     const out = [...list];
     if (sort === "popular") out.sort((a, b) => b.runs - a.runs || a.name.localeCompare(b.name));
+    else if (sort === "rated")
+      out.sort(
+        (a, b) =>
+          (b.rating ?? -1) - (a.rating ?? -1) || b.runs - a.runs || a.name.localeCompare(b.name),
+      );
     else if (sort === "cost") out.sort((a, b) => a.cost - b.cost);
     else out.sort((a, b) => a.name.localeCompare(b.name));
     return out;
@@ -179,6 +184,7 @@ export default function CatalogPane({
             className="field min-h-9 w-auto flex-1 py-1 text-micro sm:flex-none"
           >
             <option value="popular">Most used</option>
+            <option value="rated">Top rated by me</option>
             <option value="name">Name A–Z</option>
             <option value="cost">Cheapest first</option>
           </select>

@@ -139,7 +139,7 @@ export default function ResultsPane({
                       muted
                       loop
                       playsInline
-                      preload="metadata"
+                      preload="none"
                       aria-label={`Video for: ${run.prompt.slice(0, 80)}`}
                       className="size-full object-cover"
                     />
@@ -158,6 +158,11 @@ export default function ResultsPane({
                     <Icon name="eye" className="size-3.5" />
                     <span className="tnum">${run.cost.toFixed(3)}</span>
                   </span>
+                  {run.kind === "video" && (
+                    <span className="absolute left-1.5 top-1.5 flex items-center rounded bg-black/70 px-1.5 py-0.5 text-white" aria-hidden="true">
+                      <Icon name="play" className="size-3" />
+                    </span>
+                  )}
                   {run.rating != null && (
                     <span className="absolute right-1.5 top-1.5 flex items-center gap-0.5 rounded bg-black/70 px-1.5 py-0.5 text-micro text-warn">
                       ★ {run.rating}
