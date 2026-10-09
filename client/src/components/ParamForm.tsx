@@ -3,6 +3,7 @@ import Icon from "../ui/Icon";
 import { Badge, Tip } from "../ui/primitives";
 import { uploadFileBlob } from "../api";
 import { getParamType, isLoraParam, loraSlotCount, loraTokenIssues, prettyLabel, sliderBounds, sortParamEntries, TIER_B_LORA_PARAM, tierBLoraPayload } from "../params";
+import R2Picker from "./R2Picker";
 import { usePersistentState } from "../lib/hooks";
 import type { ModelSchema, ParamSpec } from "../lib/types";
 import type { TierBLora } from "../lib/models";
@@ -32,7 +33,13 @@ function ImageField({
   const [over, setOver] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [r2Open, setR2Open] = useState(false);
   const list = (Array.isArray(value) ? value : value ? [value] : []) as string[];
+
+  const pickR2 = (url: string) => {
+    if (multiple) onSet([...list, url]);
+    else onSet(url);
+  };
 
   async function upload(files: FileList | File[] | undefined) {
     const arr = Array.from(files || []);
@@ -77,6 +84,17 @@ function ImageField({
           <Icon name="trash" className="size-3.5" />
           Clear
         </button>
+        <button
+          type="button"
+          onClick={() => setR2Open(true)}
+          className="btn btn-sm btn-quiet gap-1.5"
+        >
+          <Icon name="image" className="size-3.5" />
+          {multiple ? "Add from R2" : "Replace from R2"}
+        </button>
+        {r2Open && (
+          <R2Picker open={r2Open} onClose={() => setR2Open(false)} multiple={multiple} onPick={pickR2} />
+        )}
       </div>
     );
   }
@@ -113,8 +131,19 @@ function ImageField({
           className="sr-only"
         />
       </div>
+      <button
+        type="button"
+        onClick={() => setR2Open(true)}
+        className="btn btn-sm btn-ghost mt-2 w-full justify-center gap-1.5"
+      >
+        <Icon name="image" className="size-3.5" />
+        Pick from R2
+      </button>
       {err && (
         <p className="mt-1.5 rounded-lg bg-crit/10 px-2.5 py-1.5 text-micro text-crit ring-1 ring-crit/25">{err}</p>
+      )}
+      {r2Open && (
+        <R2Picker open={r2Open} onClose={() => setR2Open(false)} multiple={multiple} onPick={pickR2} />
       )}
     </div>
   );
