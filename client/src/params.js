@@ -6,9 +6,50 @@ export function getParamType(name, spec = {}) {
   if (name === 'last_image') return 'image';
   if (spec.options && spec.options.length > 0) return 'select';
   if (spec.type === 'number' && spec.min !== undefined && spec.max !== undefined) return 'range';
+  if (isScaleParam(name, spec)) return 'range';
   if (spec.type === 'number') return 'number';
   if (spec.type === 'boolean') return 'boolean';
   return 'string';
+}
+
+/* LoRA strength fallback bounds. A numeric scale/strength param whose schema
+   declares no bounds at all would otherwise render as a typeless number box.
+   Schema bounds always win; the 0-2/step-0.05 fallback mirrors the
+   {path, scale} convention and completed-run evidence (0.85-1.1 observed,
+   default 1). */
+export function isScaleParam(name, spec = {}) {
+  const t = String(spec?.type || '').toLowerCase();
+  if (t !== 'number' && t !== 'integer') return false;
+  const n = String(name || '').toLowerCase();
+  return /lora|adapter/.test(n) && /scale|strength/.test(n);
+}
+
+/* Bounds for a range control: schema min/max first, scale fallback when the
+   schema is silent. Returns null when there is nothing to slide between. */
+export function sliderBounds(name, spec = {}) {
+  const lo = spec.min ?? spec.minimum;
+  const hi = spec.max ?? spec.maximum;
+  if (lo !== undefined && hi !== undefined && Number(hi) > Number(lo)) {
+    return { min: Number(lo), max: Number(hi), step: rangeStep(spec) };
+  }
+  if (isScaleParam(name, spec)) return { min: 0, max: 2, step: 0.05 };
+  return null;
+}
+
+/* Fine step for bounded numbers that declare none: integers stay whole,
+   fractional ranges get ~100 detents on a 1/2/5 scale. A schema step always
+   wins (lora_scale -1..3 was previously snapping to whole numbers). */
+export function rangeStep(spec = {}) {
+  if (spec.step !== undefined && spec.step !== null) return spec.step;
+  const t = String(spec?.type || '').toLowerCase();
+  if (t === 'integer') return 1;
+  const lo = Number(spec.min ?? spec.minimum);
+  const hi = Number(spec.max ?? spec.maximum);
+  if (!(hi > lo) || !isFinite(hi - lo)) return 1;
+  const raw = (hi - lo) / 100;
+  const mag = 10 ** Math.floor(Math.log10(raw));
+  const norm = raw / mag;
+  return (norm >= 5 ? 5 : norm >= 2 ? 2 : 1) * mag;
 }
 
 /* An adapter INPUT carries weights; an adapter STRENGTH does not. The two are

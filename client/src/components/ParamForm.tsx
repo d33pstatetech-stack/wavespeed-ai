@@ -2,7 +2,7 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import Icon from "../ui/Icon";
 import { Badge, Tip } from "../ui/primitives";
 import { uploadFileBlob } from "../api";
-import { getParamType, isLoraParam, loraSlotCount, loraTokenIssues, prettyLabel, sortParamEntries, TIER_B_LORA_PARAM, tierBLoraPayload } from "../params";
+import { getParamType, isLoraParam, loraSlotCount, loraTokenIssues, prettyLabel, sliderBounds, sortParamEntries, TIER_B_LORA_PARAM, tierBLoraPayload } from "../params";
 import { usePersistentState } from "../lib/hooks";
 import type { ModelSchema, ParamSpec } from "../lib/types";
 import type { TierBLora } from "../lib/models";
@@ -124,8 +124,25 @@ function ImageField({
    LoRA field — one input per slot, count taken from the real schema
    description ("up to N") exactly as the previous picker did. Keeps the
    civitai:MODEL@VERSION and full-URL validation so a typo is caught
-   before a paid run.
+   before a paid run. Each filled slot gets its own strength slider
+   (0-2, default 1): the provider takes {path, scale} objects and the
+   scale used to be hardcoded to 1 with no way to change it.
    ------------------------------------------------------------------ */
+type LoraSlot = { path: string; scale: number };
+
+function toLoraSlots(value: unknown, slots: number): LoraSlot[] {
+  const arr = Array.isArray(value) ? value : value ? [value] : [];
+  return Array.from({ length: slots }, (_, i) => {
+    const el = arr[i] as any;
+    if (el && typeof el === "object")
+      return {
+        path: String(el.path || el.url || ""),
+        scale: typeof el.scale === "number" && isFinite(el.scale) ? el.scale : 1,
+      };
+    return { path: el ? String(el) : "", scale: 1 };
+  });
+}
+
 function LoraField({
   id,
   name,
@@ -140,36 +157,63 @@ function LoraField({
   onSet: (v: unknown) => void;
 }) {
   const slots = loraSlotCount(spec as any);
-  const arr = Array.isArray(value) ? (value as string[]) : value ? [String(value)] : [];
-  const [drafts, setDrafts] = useState<string[]>(() => Array.from({ length: slots }, (_, i) => arr[i] || ""));
+  const [drafts, setDrafts] = useState<LoraSlot[]>(() => toLoraSlots(value, slots));
 
   useEffect(() => {
-    setDrafts((d) => Array.from({ length: slots }, (_, i) => d[i] || arr[i] || ""));
+    setDrafts((d) => {
+      const fresh = toLoraSlots(value, slots);
+      // A cleared value resets the rows; otherwise keep in-progress typing and
+      // adopt committed scales/paths per slot.
+      if (fresh.every((f) => !f.path)) return fresh;
+      return fresh.map((f, i) => ({ path: d[i]?.path || f.path, scale: d[i]?.scale ?? f.scale }));
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [slots, JSON.stringify(arr)]);
+  }, [slots, JSON.stringify(value)]);
 
-  const commit = (next: string[]) => {
+  const commit = (next: LoraSlot[]) => {
     setDrafts(next);
-    const kept = next.map((t) => t.trim()).filter(Boolean);
+    const kept = next
+      .map((s) => ({ path: s.path.trim(), scale: s.scale }))
+      .filter((s) => s.path);
     onSet(kept.length ? kept : undefined);
   };
 
   return (
-    <div className="grid gap-1.5" id={id}>
-      {drafts.map((tok, i) => {
-        const issue = loraTokenIssues(tok);
+    <div className="grid gap-2.5" id={id}>
+      {drafts.map((slot, i) => {
+        const issue = loraTokenIssues(slot.path);
         return (
-          <div key={i}>
+          <div key={i} className="grid gap-1.5">
             <input
               type="text"
-              value={tok}
-              onChange={(e) => commit(drafts.map((d, j) => (j === i ? e.target.value : d)))}
+              value={slot.path}
+              onChange={(e) => commit(drafts.map((d, j) => (j === i ? { ...d, path: e.target.value } : d)))}
               placeholder={i === 0 ? "civitai:MODEL@VERSION or https://…safetensors" : "empty"}
               aria-label={`${label(name, spec)} ${i + 1}`}
               aria-invalid={issue ? true : undefined}
               className={`field font-mono ${issue ? "ring-crit/50" : ""}`}
             />
             {issue && <p className="mt-1 text-micro text-crit">{issue}</p>}
+            {slot.path.trim() && (
+              <div className="flex items-center gap-3">
+                <span className="shrink-0 text-micro text-t3">Strength</span>
+                <input
+                  type="range"
+                  min={0}
+                  max={2}
+                  step={0.05}
+                  value={slot.scale}
+                  onChange={(e) =>
+                    commit(drafts.map((d, j) => (j === i ? { ...d, scale: Number(e.target.value) } : d)))
+                  }
+                  aria-label={`${label(name, spec)} ${i + 1} strength`}
+                  className="h-9 min-w-0 flex-1 accent-[var(--color-accent)]"
+                />
+                <output className="tnum w-12 shrink-0 rounded-md bg-s0 py-1 text-center text-micro font-medium text-t1 ring-1 ring-line">
+                  {Math.round(slot.scale * 100) / 100}
+                </output>
+              </div>
+            )}
           </div>
         );
       })}
@@ -228,15 +272,18 @@ function Field({ name, spec, value, onSet }: { name: string; spec: ParamSpec; va
       );
     }
     if (kind === "range") {
-      const v = Number(value ?? spec.default ?? spec.min);
+      const b = sliderBounds(name, spec as any);
+      const lo = b?.min ?? spec.min ?? 0;
+      const hi = b?.max ?? spec.max ?? 1;
+      const v = Number(value ?? spec.default ?? lo);
       return (
         <div className="flex items-center gap-3">
           <input
             id={id}
             type="range"
-            min={spec.min}
-            max={spec.max}
-            step={spec.step ?? 1}
+            min={lo}
+            max={hi}
+            step={b?.step ?? spec.step ?? 1}
             value={v}
             aria-describedby={describedBy}
             onChange={(e) => onSet(Number(e.target.value))}
