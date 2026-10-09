@@ -14,7 +14,7 @@
 
 const WAVESPEED_BASE = 'https://api.wavespeed.ai/api/v3';
 
-const PROTECTED_API_PREFIXES = ['/api/generate', '/api/upload', '/api/predictions', '/api/sync', '/api/enhance', '/api/optimize', '/api/llm-config', '/api/prompts', '/api/wavespeed', '/api/cloud', '/api/history', '/api/lora', '/api/judge'];
+const PROTECTED_API_PREFIXES = ['/api/generate', '/api/upload', '/api/predictions', '/api/sync', '/api/enhance', '/api/optimize', '/api/estimate', '/api/llm-config', '/api/prompts', '/api/wavespeed', '/api/cloud', '/api/history', '/api/lora', '/api/judge'];
 
 // Array order IS the priority mechanism: the first provider that answers wins.
 //

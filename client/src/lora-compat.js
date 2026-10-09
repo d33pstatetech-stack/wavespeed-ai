@@ -20,9 +20,6 @@ let centralVerified = null;
 export function setCentralVerified(rows) {
   centralVerified = Array.isArray(rows) ? rows : null;
 }
-export function getCentralVerified() {
-  return centralVerified;
-}
 
 /* ------------------------------------------------------------------
    normName — the ONE normalisation behind every identity comparison.
