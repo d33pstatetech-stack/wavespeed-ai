@@ -46,20 +46,24 @@ function ImageField({
     if (!arr.length) return;
     setBusy(true);
     setErr(null);
-    try {
-      const urls: string[] = [];
-      for (const f of arr) {
+    // Upload each file independently: one bad/oversized file must not discard
+    // the rest of a multi-select batch. Keep every URL that did succeed and
+    // name the ones that failed so the user can retry just those.
+    const kept: string[] = [];
+    const failed: string[] = [];
+    for (const f of arr) {
+      try {
         const res: any = await uploadFileBlob(f);
-        urls.push(res.url || res.fileUrl || res.href || res.path || "");
+        const url = res.url || res.fileUrl || res.href || res.path || "";
+        if (url) kept.push(url);
+        else failed.push(f.name);
+      } catch {
+        failed.push(f.name);
       }
-      const kept = urls.filter(Boolean);
-      if (!kept.length) throw new Error("Upload returned no URL");
-      onSet(multiple ? [...list, ...kept] : kept[0]);
-    } catch (e) {
-      setErr((e as Error).message || "Upload failed");
-    } finally {
-      setBusy(false);
     }
+    if (kept.length) onSet(multiple ? [...list, ...kept] : kept[0]);
+    if (failed.length) setErr(`${failed.length} image(s) could not be uploaded: ${failed.join(", ")}`);
+    setBusy(false);
   }
 
   if (list.length) {
@@ -92,6 +96,26 @@ function ImageField({
           <Icon name="image" className="size-3.5" />
           {multiple ? "Add from R2" : "Replace from R2"}
         </button>
+        {multiple && (
+          <>
+            <label htmlFor={`${id}-more`} className="btn btn-sm btn-quiet gap-1.5 cursor-pointer">
+              <Icon name={busy ? "refresh" : "upload"} className="size-3.5" />
+              {busy ? "Uploading…" : "Add more images"}
+            </label>
+            <input
+              id={`${id}-more`}
+              type="file"
+              accept="image/*"
+              multiple
+              aria-label="Add more images"
+              onChange={(e) => upload(e.target.files ?? undefined)}
+              className="sr-only"
+            />
+          </>
+        )}
+        {err && (
+          <p className="rounded-lg bg-crit/10 px-2.5 py-1.5 text-micro text-crit ring-1 ring-crit/25">{err}</p>
+        )}
         {r2Open && (
           <R2Picker open={r2Open} onClose={() => setR2Open(false)} multiple={multiple} onPick={pickR2} />
         )}
